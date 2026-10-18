@@ -48,6 +48,16 @@
 <dialog id="pv" class="px L preview" aria-labelledby="pv-title">
   <div class="px L pill" id="pv-title">Preview</div>
   <div id="pv-link">
+    <label for="pv-base">Base URL</label>
+    <div class="pv-base">
+      <div class="px M field"><select id="pv-base">
+        <option value="here">This page</option>
+        <option value="gh">https://aahan0511.github.io/Split-da-money/</option>
+        <option value="custom">Custom&hellip;</option>
+      </select></div>
+      <div class="px M field" id="pv-custom-wrap" hidden><input id="pv-custom" type="url" placeholder="https://example.com/split/" aria-label="Custom base URL"></div>
+    </div>
+    <label for="pv-url">Link</label>
     <div class="px M field"><textarea id="pv-url" rows="4" readonly aria-label="Share link"></textarea></div>
     <p class="hint" id="pv-info"></p>
     <a id="pv-open" class="px M btn" target="_blank" rel="noopener" style="--fill:var(--cream)">Open in new tab</a>

@@ -189,8 +189,25 @@ async function decodeState(code){
   while (ppl.length < nn) ppl.push(newFriend());
   return {n: nn, people: ppl};
 }
+const hereUrl = () => location.href.split('#')[0];
 async function shareUrl(){
-  return location.href.split('#')[0] + '#d=' + await encodeState();
+  return hereUrl() + '#d=' + await encodeState();
+}
+
+/* base URL of copied links: this page, the GitHub Pages copy, or any address the user types (saved in this browser) */
+const BASE_KEY = 'sdm-base', GH_PAGES = 'https://aahan0511.github.io/Split-da-money/';
+let base = {kind:'here', custom:''};
+try { const b = JSON.parse(localStorage.getItem(BASE_KEY)); if (b && ['here','gh','custom'].includes(b.kind)) base = {kind: b.kind, custom: String(b.custom || '')}; } catch(e){}
+const saveBase = () => { try { localStorage.setItem(BASE_KEY, JSON.stringify(base)); } catch(e){} };
+// returns the chosen base without any #hash, or null when the custom one is not a usable address
+function baseUrl(){
+  if (base.kind === 'gh') return GH_PAGES;
+  if (base.kind !== 'custom') return hereUrl();
+  try {
+    const u = new URL(base.custom.trim());
+    if (!['http:','https:','file:'].includes(u.protocol)) return null;
+    u.hash = ''; return u.href;
+  } catch(e){ return null; }
 }
 
 let syncTimer = null;
@@ -198,7 +215,7 @@ function scheduleSync(){
   clearTimeout(syncTimer);
   syncTimer = setTimeout(async () => {   // keep the address bar equal to the share link
     try {
-      const url = hasData() ? await shareUrl() : location.href.split('#')[0];
+      const url = hasData() ? await shareUrl() : hereUrl();
       history.replaceState(null, '', url);
     } catch(e){}
   }, 300);
@@ -218,16 +235,19 @@ async function copyText(text){
   ta.remove(); return ok;
 }
 async function copyLink(){
-  const url = await shareUrl();
-  try { history.replaceState(null, '', url); } catch(e){}
-  if (previewOn()) return showPreview('link', url);
-  await doCopyLink(url);
+  const code = await encodeState();
+  try { history.replaceState(null, '', hereUrl() + '#d=' + code); } catch(e){}
+  if (previewOn()) return showPreview('link', code);
+  const b = baseUrl();
+  if (!b) return toast('The custom base URL is not a valid address. Turn on "Preview first" to fix it.', 5000);
+  await doCopyLink(b + '#d=' + code);
 }
 async function doCopyLink(url){
   if (await copyText(url)){
-    toast(location.protocol === 'file:'
+    const local = url.startsWith('file:');
+    toast(local
       ? 'Link copied! It only opens on this computer. Put index.html online (any web host) so friends can open it.'
-      : 'Link copied! Anyone who opens it sees these details and can edit them.', location.protocol === 'file:' ? 7000 : 3500);
+      : 'Link copied! Anyone who opens it sees these details and can edit them.', local ? 7000 : 3500);
   } else {
     window.prompt('Copy this link:', url);
   }
@@ -241,24 +261,45 @@ $('preview').addEventListener('change', () => {
   try { localStorage.setItem(PREVIEW_KEY, previewOn() ? '1' : '0'); } catch(e){}
 });
 
-let pv = null;          // what the open preview will copy / download: {kind, url} or {kind, url, blob, file, name}
+let pv = null;          // what the open preview will copy / download: {kind, code, url} or {kind, url, blob, file, name}
 function showPreview(kind, data){
   closePreview();
   const isLink = kind === 'link';
-  pv = isLink ? {kind, url: data} : {kind, ...data, url: URL.createObjectURL(data.blob)};
+  pv = isLink ? {kind, code: data, url: ''} : {kind, ...data, url: URL.createObjectURL(data.blob)};
   $('pv-title').textContent = isLink ? 'Preview link' : kind === 'pdf' ? 'Preview PDF' : 'Preview picture';
   $('pv-go').textContent = isLink ? 'Copy link' : kind === 'pdf' ? 'Download PDF' : 'Download';
   $('pv-link').hidden = !isLink;
   $('pv-img').hidden = isLink;
   if (isLink){
-    $('pv-url').value = data;
-    $('pv-open').href = data;
-    $('pv-info').textContent = `${data.length} characters · ${count()} friends · total ${last && last.total ? fmt(last.total) : fmt(0)}`;
+    $('pv-base').value = base.kind;
+    $('pv-custom').value = base.custom;
+    updateLinkPreview();
   } else {
     $('pv-pic').src = pv.url;
   }
   $('pv').showModal();
 }
+function updateLinkPreview(){
+  const b = baseUrl(), url = b ? b + '#d=' + pv.code : '';
+  pv.url = url;
+  $('pv-custom-wrap').hidden = base.kind !== 'custom';
+  $('pv-url').value = url;
+  $('pv-open').hidden = !url;
+  if (url) $('pv-open').href = url;
+  $('pv-go').disabled = !url;
+  $('pv-info').textContent = url
+    ? `${url.length} characters · ${count()} friends · total ${last && last.total ? fmt(last.total) : fmt(0)}`
+    : 'Type a full address, like https://example.com/split/';
+}
+$('pv-base').addEventListener('change', e => {
+  base.kind = e.target.value; saveBase();
+  updateLinkPreview();
+  if (base.kind === 'custom') $('pv-custom').focus();
+});
+$('pv-custom').addEventListener('input', e => {
+  base.custom = e.target.value; saveBase();
+  if (pv && pv.kind === 'link') updateLinkPreview();
+});
 function closePreview(){
   if (pv && pv.blob) URL.revokeObjectURL(pv.url);
   pv = null;
@@ -267,7 +308,7 @@ function closePreview(){
 }
 $('pv-go').addEventListener('click', async () => {
   const cur = pv; if (!cur) return;
-  if (cur.kind === 'link') await doCopyLink(cur.url);
+  if (cur.kind === 'link'){ if (!cur.url) return; await doCopyLink(cur.url); }
   else downloadBlob(cur.file, cur.name);
   closePreview();
 });

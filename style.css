@@ -59,6 +59,10 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 textarea{display:block;width:100%;font:400 12px/1.5 var(--font);color:var(--ink);background:transparent;
          border:0;padding:0;outline:none;resize:vertical;word-break:break-all}
 a.btn{display:inline-block;text-decoration:none}
+a.btn[hidden]{display:none}
+.pv-base{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+#pv-custom-wrap[hidden]{display:none}
+select{width:100%;font:700 13px var(--font);color:var(--ink);background:transparent;border:0;padding:0;outline:none;cursor:pointer}
 .pic{--fill:#fffaf0;padding:calc(var(--b) + 8px)}
 .pic img{display:block;width:100%;height:auto;max-height:60vh;object-fit:contain}
 .pv-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}
