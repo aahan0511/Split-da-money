@@ -23,8 +23,11 @@
 
 const $ = id => document.getElementById(id);
 const colsEl = $('cols'), boardEl = $('board');
-const newExp = () => ({amt:'', why:'', skip:[]});
-let people = [];        // [{name, exps:[{amt, why, skip:[friend indices left out], open}]}]
+let nextId = 1;
+const newExp = (o = {}) => ({id: nextId++, amt:'', why:'', skip:[], at:null, ...o});
+let people = [];        // [{name, exps:[{id, amt, why, skip:[friend indices left out], at: time in ms, open}]}]
+let transfers = [];     // paid back: [{id, from, to, amt, why, at}]
+const isBlank = e => e.amt === '' && e.why === '';
 let last = null;        // latest result, used for the picture
 
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -79,6 +82,9 @@ function build(focus){
             </div>`).join('')}
          </div>
        </div>
+       ${transfers.some(t => t.from === i && t.to < n) ? `<div><label>Paid back</label><div class="pbs">${transfers.filter(t => t.from === i && t.to < n).map(t =>
+         `<div class="px M pb" data-t="${t.id}"><span>&rarr; ${esc(nameOf(t.to))}${t.why.trim() ? ` <i>${esc(t.why.trim())}</i>` : ''}</span><b>${fmt(toPaise(t.amt))}</b>
+            <button class="px M btn rmt" type="button" title="Delete this payment" aria-label="Delete payment">${ICON_RM}</button></div>`).join('')}</div></div>` : ''}
        <button class="px M btn add" type="button">+ Add expense</button>
        <div class="sub" id="sub${i}"></div>
        <div class="px M chip" id="bal${i}"></div>
@@ -112,22 +118,28 @@ function calc(){
     s.forEach((q, j) => share[q] += base + (j < rem ? 1 : 0));
   });
   const uneven = [...groups.keys()].some(k => k.split(',').length !== n);
-  const bal = paid.map((p,i) => p - share[i]);                                // + gets back, - has to pay
+  // money paid back between friends moves balances but is not spending
+  const sent = Array(n).fill(0), got = Array(n).fill(0);
+  transfers.forEach(t => { const a = toPaise(t.amt); if (a && t.from !== t.to && t.from < n && t.to < n){ sent[t.from] += a; got[t.to] += a; } });
+  const moved = sent.reduce((a,b) => a+b, 0), active = total || moved;
+  const bal = paid.map((p,i) => p - share[i] + sent[i] - got[i]);              // + gets back, - has to pay
 
   bal.forEach((b,i) => {
-    $('sub'+i).textContent = [paid[i] ? `Total paid: ${fmt(paid[i])}` : '', uneven ? `Share: ${fmt(share[i])}` : ''].filter(Boolean).join(' · ');
+    if (!$('sub'+i)) return;
+    $('sub'+i).textContent = [paid[i] ? `Total paid: ${fmt(paid[i])}` : '', uneven ? `Share: ${fmt(share[i])}` : '',
+                              sent[i] ? `Paid back: ${fmt(sent[i])}` : '', got[i] ? `Got back: ${fmt(got[i])}` : ''].filter(Boolean).join(' · ');
     const el = $('bal'+i);
-    if (!total){ el.className = 'px M chip'; el.textContent = ''; }
+    if (!active){ el.className = 'px M chip'; el.textContent = ''; }
     else if (b > 0){ el.className = 'px M chip gets'; el.textContent = `Gets back ${fmt(b)}`; }
     else if (b < 0){ el.className = 'px M chip pays'; el.textContent = `Needs to pay ${fmt(-b)}`; }
     else { el.className = 'px M chip'; el.textContent = 'All good'; }
   });
 
   const sum = $('summary');
-  sum.hidden = !total;
-  sum.textContent = uneven
+  sum.hidden = !active;
+  sum.textContent = (uneven
     ? `Total spent ${fmt(total)}. Some expenses leave friends out, so shares differ (see each friend).`
-    : `Total spent ${fmt(total)}. Each friend's fair share: ${fmt(total / n)}.`;
+    : `Total spent ${fmt(total)}. Each friend's fair share: ${fmt(total / n)}.`) + (moved ? ` ${fmt(moved)} already paid back.` : '');
 
   const cr = [], db = [];
   bal.forEach((b,i) => { if (b>0) cr.push({i,v:b}); else if (b<0) db.push({i,v:-b}); });
@@ -142,13 +154,13 @@ function calc(){
   }
 
   const ul = $('settle');
-  if (!total) ul.innerHTML = '<li class="px M">Type the amounts above.</li>';
-  else if (!out.length) ul.innerHTML = '<li class="px M">Everyone paid the same. Nothing to settle!</li>';
+  if (!active) ul.innerHTML = '<li class="px M">Type the amounts above.</li>';
+  else if (!out.length) ul.innerHTML = `<li class="px M">${moved ? 'All settled up!' : 'Everyone paid the same. Nothing to settle!'}</li>`;
   else ul.innerHTML = out.map(t =>
     `<li class="px M t"><span class="who">${esc(nameOf(t.from))}</span> gives <span class="who to">${esc(nameOf(t.to))}</span><span class="amt">${fmt(t.v)}</span></li>`).join('');
 
-  last = {n, paid, total, share, uneven, bal, out};
-  $('export').disabled = $('export-pdf').disabled = !total;
+  last = {n, paid, total, share, uneven, bal, out, sent, got, active};
+  updateExportMenu();
   scheduleSync();
   relayout();
 }
@@ -160,14 +172,16 @@ const unb64 = t => { t = t.replace(/-/g,'+').replace(/_/g,'/'); while (t.length 
                      const s = atob(t), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; };
 const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
 
+// times travel in whole minutes to keep links short
+const toMin = at => at ? Math.round(at / 60000) : 0;
 function stateArray(){
   const n = count();
   return [n, people.slice(0, n).map(p => [
     p.name,
-    p.exps.filter(e => e.amt !== '' || e.why !== '').map(e => e.skip.length ? [e.amt, e.why, [...e.skip].sort((a,b) => a-b)] : [e.amt, e.why])
-  ])];
+    p.exps.filter(e => !isBlank(e)).map(e => [e.amt, e.why, [...e.skip].sort((a,b) => a-b), toMin(e.at)])
+  ]), transfers.map(t => [t.from, t.to, t.amt, t.why, toMin(t.at)])];
 }
-const hasData = () => stateArray()[1].some(p => p[0].trim() || p[1].length);
+const hasData = () => { const s = stateArray(); return s[1].some(p => p[0].trim() || p[1].length) || s[2].length > 0; };
 
 async function encodeState(){
   const raw = new TextEncoder().encode(JSON.stringify(stateArray()));
@@ -178,16 +192,20 @@ async function decodeState(code){
   let bytes = unb64(code.slice(1));
   if (code[0] === 'z') bytes = await pipe(bytes, new DecompressionStream('deflate-raw'));
   else if (code[0] !== 'r') throw new Error('unknown format');
-  const [n, list] = JSON.parse(new TextDecoder().decode(bytes));
+  const [n, list, tlist] = JSON.parse(new TextDecoder().decode(bytes));
+  const now = Date.now(), atOf = v => { const m = parseInt(v, 10); return m > 0 ? m * 60000 : now; };
   const cl = (v, m) => String(v == null ? '' : v).slice(0, m);
   const nn = Math.max(MIN_FRIENDS, Math.min(MAX_FRIENDS, parseInt(n, 10) || MIN_FRIENDS));
   const ppl = (Array.isArray(list) ? list : []).slice(0, nn).map(p => {
-    const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 50).map(e => ({amt: cl(e[0], 20), why: cl(e[1], 200),
-      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))]}));
+    const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 200).map(e => newExp({amt: cl(e[0], 20), why: cl(e[1], 200),
+      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))], at: atOf(e[3])}));
     return {name: cl(p[0], 100), exps: exps.length ? exps : [newExp()]};
   });
   while (ppl.length < nn) ppl.push(newFriend());
-  return {n: nn, people: ppl};
+  const okIdx = v => Number.isInteger(v) && v >= 0 && v < nn;
+  const tr = (Array.isArray(tlist) ? tlist : []).slice(0, 500).filter(t => Array.isArray(t) && okIdx(t[0]) && okIdx(t[1]) && t[0] !== t[1])
+    .map(t => ({id: nextId++, from: t[0], to: t[1], amt: cl(t[2], 20), why: cl(t[3], 200), at: atOf(t[4])}));
+  return {n: nn, people: ppl, transfers: tr};
 }
 const hereUrl = () => location.href.split('#')[0];
 async function shareUrl(){
@@ -251,20 +269,29 @@ async function doCopyLink(url){
 }
 
 /* ---------- preview before copying / downloading ---------- */
-let pv = null;          // what the open preview will copy / download: {kind, code, url} or {kind, url, blob, file, name}
+// what the open preview will copy / download: {kind, code, url} for a link, else {kind, file, name} plus
+// a picture to show (blob, url) or a table to show (html)
+let pv = null;
+const PV_TEXT = {
+  link: ['Preview link', 'Copy link'], png: ['Preview picture', 'Download'], pdf: ['Preview PDF', 'Download PDF'],
+  'lg-png': ['Preview ledger picture', 'Download'], 'lg-pdf': ['Preview ledger PDF', 'Download PDF'],
+  csv: ['Preview ledger CSV', 'Download CSV'], xlsx: ['Preview ledger Excel file', 'Download Excel']
+};
 function showPreview(kind, data){
   closePreview();
   const isLink = kind === 'link';
-  pv = isLink ? {kind, code: data, url: ''} : {kind, ...data, url: URL.createObjectURL(data.blob)};
-  $('pv-title').textContent = isLink ? 'Preview link' : kind === 'pdf' ? 'Preview PDF' : 'Preview picture';
-  $('pv-go').textContent = isLink ? 'Copy link' : kind === 'pdf' ? 'Download PDF' : 'Download';
+  pv = isLink ? {kind, code: data, url: ''} : {kind, ...data, url: data.blob ? URL.createObjectURL(data.blob) : ''};
+  [$('pv-title').textContent, $('pv-go').textContent] = PV_TEXT[kind];
+  $('pv-go').disabled = false;
   $('pv-link').hidden = !isLink;
-  $('pv-img').hidden = isLink;
+  $('pv-img').hidden = !pv.blob;
+  $('pv-table').hidden = !pv.html;
+  $('pv-table').innerHTML = pv.html || '';
   if (isLink){
     $('pv-base').value = base.kind;
     $('pv-custom').value = base.custom;
     updateLinkPreview();
-  } else {
+  } else if (pv.blob){
     $('pv-pic').src = pv.url;
   }
   $('pv').showModal();
@@ -312,7 +339,7 @@ async function loadFromHash(){
   if (!m) return false;
   try {
     const s = await decodeState(m[1]);
-    people = s.people;
+    people = s.people; transfers = s.transfers;
     return true;
   } catch(e){
     toast('This link looks broken, so it could not be opened.', 5000);
@@ -334,6 +361,7 @@ colsEl.addEventListener('input', e => {
     const ex = p.exps[+row.dataset.e];
     if (e.target.classList.contains('am')) ex.amt = e.target.value;
     if (e.target.classList.contains('wy')) ex.why = e.target.value;
+    if (!ex.at && !isBlank(ex)) ex.at = Date.now();   // an expense gets its time when it is first typed
   }
   calc();
 });
@@ -355,10 +383,17 @@ colsEl.addEventListener('click', e => {
     else return toast('At least one friend has to share this expense.');
     build();
     colsEl.querySelector(`.friend[data-p="${pi}"] .exp[data-e="${j}"] .tag[data-q="${q}"]`).focus();
+  } else if (e.target.closest('.pb .rmt')){
+    const id = +e.target.closest('.pb').dataset.t;
+    transfers = transfers.filter(t => t.id !== id);
+    build();
   } else if (e.target.closest('.rmf')){
     if (people.length <= MIN_FRIENDS) return;
     people.splice(pi, 1);
     people.forEach(q => q.exps.forEach(ex => ex.skip = ex.skip.filter(x => x !== pi).map(x => x > pi ? x - 1 : x)));
+    const before = transfers.length, shift = x => x > pi ? x - 1 : x;
+    transfers = transfers.filter(t => t.from !== pi && t.to !== pi).map(t => ({...t, from: shift(t.from), to: shift(t.to)}));
+    if (transfers.length < before) toast(`Also removed ${before - transfers.length} paid-back ${before - transfers.length === 1 ? 'entry' : 'entries'} with this friend.`);
     layout.cards.splice(pi, 1); saveLayout();
     build();
   } else if (e.target.closest('.rm')){
@@ -374,11 +409,205 @@ $('add-friend').addEventListener('click', () => {
   layout.cards[i] = defCard(i, true); saveLayout();
   build({p:i, name:true});
 });
-$('reset').addEventListener('click', () => { people.forEach(p => p.exps = [newExp()]); build(); });
-$('export').addEventListener('click', () => exportPicture('png'));
-$('export-pdf').addEventListener('click', () => exportPicture('pdf'));
+$('reset').addEventListener('click', () => { people.forEach(p => p.exps = [newExp()]); transfers = []; build(); });
 $('link').addEventListener('click', copyLink);
-window.addEventListener('hashchange', async () => { if (await loadFromHash()) build(); });
+window.addEventListener('hashchange', async () => { if (await loadFromHash()){ build(); renderLedger(); } });
+
+/* ---------- export menu: everything that downloads lives here ---------- */
+const menuEl = $('export-list'), menuBtn = $('export-menu');
+function updateExportMenu(){
+  const noSplit = !last || !last.active, noLedger = !ledgerRows().length;
+  menuEl.querySelectorAll('[data-x]').forEach(b => {
+    const x = b.dataset.x;
+    b.disabled = x === 'png' || x === 'pdf' ? noSplit : x === 'settings' ? false : noLedger;
+  });
+}
+function openMenu(open){
+  menuEl.hidden = !open;
+  menuBtn.setAttribute('aria-expanded', open);
+  if (open){ updateExportMenu(); const first = menuEl.querySelector('button:not(:disabled)'); if (first) first.focus(); }
+}
+menuBtn.addEventListener('click', () => openMenu(menuEl.hidden));
+document.addEventListener('click', e => { if (!menuEl.hidden && !e.target.closest('.menu-wrap')) openMenu(false); });
+menuEl.addEventListener('keydown', e => {
+  const items = [...menuEl.querySelectorAll('button:not(:disabled)')], i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape'){ openMenu(false); menuBtn.focus(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  }
+});
+menuEl.addEventListener('click', e => {
+  const b = e.target.closest('[data-x]'); if (!b || b.disabled) return;
+  openMenu(false);
+  const x = b.dataset.x;
+  if (x === 'settings'){ drawExportSettings(); $('xs').showModal(); }
+  else if (x === 'png' || x === 'pdf') exportPicture(x);
+  else exportLedger(x);
+});
+
+/* ---------- pages: Split and Ledger share the same data ---------- */
+const TAB_KEY = 'sdm-tab';
+function showTab(t){
+  document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
+  $('page-split').hidden = t !== 'split';
+  $('page-ledger').hidden = t !== 'ledger';
+  document.querySelectorAll('.split-only').forEach(el => el.hidden = t !== 'split');
+  if (t === 'split') build(); else renderLedger();
+  try { localStorage.setItem(TAB_KEY, t); } catch(e){}
+}
+document.querySelector('.tabs').addEventListener('click', e => { const b = e.target.closest('.tab'); if (b) showTab(b.dataset.tab); });
+
+/* ---------- ledger: one table row per expense or payment ---------- */
+const TYPES = [['exp', 'Expense'], ['for', 'Paid for'], ['back', 'Paid back']];
+const typeName = t => TYPES.find(x => x[0] === t)[1];
+const z2 = v => String(v).padStart(2, '0');
+const localDT = at => { if (!at) return ''; const d = new Date(at); return `${d.getFullYear()}-${z2(d.getMonth()+1)}-${z2(d.getDate())}T${z2(d.getHours())}:${z2(d.getMinutes())}`; };
+const fmtAt = at => at ? new Date(at).toLocaleString(undefined, {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+const everyone = () => Array.from({length: count()}, (_, q) => q);
+const otherThan = i => i === 0 ? 1 : 0;
+
+function findEntry(id){
+  for (let p = 0; p < people.length; p++){
+    const j = people[p].exps.findIndex(e => e.id === id);
+    if (j >= 0) return {kind:'e', p, j, e: people[p].exps[j]};
+  }
+  const k = transfers.findIndex(t => t.id === id);
+  return k >= 0 ? {kind:'t', k, t: transfers[k]} : null;
+}
+// the ledger's view of an entry: {id, type, by, to:[friends], amt, why, at}
+function rowOf(f){
+  if (f.kind === 't') return {id: f.t.id, type:'back', by: f.t.from, to:[f.t.to], amt: f.t.amt, why: f.t.why, at: f.t.at};
+  const s = sharers(f.e, count());
+  return {id: f.e.id, type: s.length === 1 && s[0] !== f.p ? 'for' : 'exp', by: f.p, to: s, amt: f.e.amt, why: f.e.why, at: f.e.at};
+}
+function ledgerRows(){
+  const rows = [];
+  people.forEach((p, i) => p.exps.forEach((e, j) => { if (!isBlank(e)) rows.push(rowOf({kind:'e', p:i, j, e})); }));
+  transfers.forEach((t, k) => rows.push(rowOf({kind:'t', k, t})));
+  return rows.sort((a, b) => (a.at || 0) - (b.at || 0) || a.id - b.id);
+}
+const forText = r => r.type === 'exp' && r.to.length === count() ? 'Everyone' : r.to.map(nameOf).join(', ');
+// keep a row sensible: "Paid for" / "Paid back" need one other friend, "Expense" needs somebody
+function tidy(r){
+  if (r.type === 'exp'){ if (!r.to.length) r.to = everyone(); }
+  else { const t = r.to.find(q => q !== r.by); r.to = [t === undefined ? otherThan(r.by) : t]; }
+  return r;
+}
+function dropExp(p, j){ const ex = people[p].exps; ex.splice(j, 1); if (!ex.length) ex.push(newExp()); }
+function addExp(p, e){
+  const ex = people[p].exps;
+  if (ex.length && isBlank(ex[ex.length - 1])) ex.splice(ex.length - 1, 0, e); else ex.push(e);
+  if (ex.length === 2 && isBlank(ex[1]) && ex[0] === e) ex.pop();    // a friend's lone empty line is replaced
+}
+// write a ledger row back into the Split data (moving it between friends or between expense and payment)
+function saveRow(r){
+  tidy(r);
+  const f = findEntry(r.id);
+  if (r.type === 'back'){
+    const t = {id: r.id, from: r.by, to: r.to[0], amt: r.amt, why: r.why, at: r.at};
+    if (f && f.kind === 't') transfers[f.k] = t;
+    else { if (f) dropExp(f.p, f.j); transfers.push(t); }
+    return;
+  }
+  const fields = {amt: r.amt, why: r.why, at: r.at, skip: everyone().filter(q => !r.to.includes(q))};
+  if (f && f.kind === 'e' && f.p === r.by){ Object.assign(f.e, fields); return; }
+  const e = f && f.kind === 'e' ? Object.assign(f.e, fields) : newExp({...fields, id: r.id});
+  if (f) f.kind === 'e' ? dropExp(f.p, f.j) : transfers.splice(f.k, 1);
+  addExp(r.by, e);
+}
+function deleteEntry(id){
+  const f = findEntry(id); if (!f) return;
+  if (f.kind === 'e') dropExp(f.p, f.j); else transfers.splice(f.k, 1);
+}
+
+let draft = null;        // the "new entry" row
+const newDraft = (keep = {}) => tidy({id: 'new', type: keep.type || 'exp', by: Math.min(keep.by || 0, count() - 1), to: keep.type && keep.type !== 'exp' ? (keep.to || []) : everyone(),
+                                      amt:'', why:'', at: Date.now()});
+function lgRow(r){
+  const isNew = r.id === 'new', n = count();
+  const opt = (v, label, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
+  const target = r.type === 'exp'
+    ? `<div class="tags" role="group" aria-label="Split between">${everyone().map(q => {
+        const on = r.to.includes(q);
+        return `<button class="px M btn tag c${q%4}${on ? '' : ' off'}" type="button" data-q="${q}" aria-pressed="${on}" title="${esc(nameOf(q))}${on ? '' : ' (left out)'}">${esc(tagText(q))}</button>`;
+      }).join('')}</div>`
+    : `<div class="px M field"><select class="lg-to" aria-label="${r.type === 'back' ? 'Paid back to' : 'Paid for'}">${
+        everyone().filter(q => q !== r.by).map(q => opt(q, nameOf(q), q === r.to[0])).join('')}</select></div>`;
+  return `<tr data-id="${r.id}"${isNew ? ' class="lg-new"' : ''}>
+    <td><div class="px M field"><input class="lg-at" type="datetime-local" value="${localDT(r.at)}" aria-label="Date and time"></div></td>
+    <td><div class="px M field"><select class="lg-type" aria-label="Type">${TYPES.map(([v, l]) => opt(v, l, v === r.type)).join('')}</select></div></td>
+    <td><div class="px M field"><select class="lg-by" aria-label="Paid by">${everyone().map(q => opt(q, nameOf(q), q === r.by)).join('')}</select></div></td>
+    <td><div class="px M field"><input class="lg-amt" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(r.amt)}" aria-label="Amount"></div></td>
+    <td>${target}</td>
+    <td><div class="px M field"><input class="lg-why" placeholder="${isNew ? 'Note (optional)' : '—'}" value="${esc(r.why)}" aria-label="Note"></div></td>
+    <td>${isNew ? '<button class="px M btn blue lg-add" type="button">Add</button>'
+               : `<button class="px M btn rmt lg-del" type="button" title="Delete entry" aria-label="Delete entry">${ICON_RM}</button>`}</td>
+  </tr>`;
+}
+function renderLedger(focus){
+  if (!draft || draft.by >= count()) draft = newDraft(draft || {});
+  tidy(draft);
+  $('lg-new').innerHTML = lgRow(draft);
+  const rows = ledgerRows();
+  $('lg-body').innerHTML = rows.length ? rows.map(lgRow).join('')
+    : '<tr class="lg-empty"><td colspan="7">No entries yet. Add one above, or type amounts on the Split page.</td></tr>';
+  ledgerTotals(rows);
+  if (focus){
+    const el = document.querySelector(`#page-ledger tr[data-id="${focus.id}"] ${focus.sel}`);
+    if (el) el.focus();
+  }
+}
+function ledgerTotals(rows = ledgerRows()){
+  const spent = rows.filter(r => r.type !== 'back').reduce((s, r) => s + toPaise(r.amt), 0);
+  const back = rows.filter(r => r.type === 'back').reduce((s, r) => s + toPaise(r.amt), 0);
+  $('lg-total').textContent = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'} · Total spent ${fmt(spent)} · Paid back ${fmt(back)}`;
+}
+const rowFrom = el => {
+  const tr = el.closest('tr[data-id]'); if (!tr) return null;
+  if (tr.dataset.id === 'new') return draft;
+  const f = findEntry(+tr.dataset.id);
+  return f ? rowOf(f) : null;
+};
+const ledgerEl = $('page-ledger');
+ledgerEl.addEventListener('input', e => {
+  const r = rowFrom(e.target); if (!r) return;
+  if (e.target.classList.contains('lg-amt')) r.amt = e.target.value;
+  else if (e.target.classList.contains('lg-why')) r.why = e.target.value;
+  else return;
+  if (r !== draft){ saveRow(r); calc(); ledgerTotals(); }
+});
+ledgerEl.addEventListener('change', e => {
+  const t = e.target, r = rowFrom(t); if (!r) return;
+  const cls = ['lg-at', 'lg-type', 'lg-by', 'lg-to'].find(c => t.classList.contains(c)); if (!cls) return;
+  if (cls === 'lg-at') r.at = t.value ? new Date(t.value).getTime() : Date.now();
+  if (cls === 'lg-type'){ r.type = t.value; if (r.type === 'exp') r.to = everyone(); }
+  if (cls === 'lg-by') r.by = +t.value;
+  if (cls === 'lg-to') r.to = [+t.value];
+  if (r !== draft){ saveRow(r); calc(); } else tidy(r);
+  renderLedger({id: r.id, sel: '.' + cls});
+});
+ledgerEl.addEventListener('click', e => {
+  const tag = e.target.closest('.tag'), del = e.target.closest('.lg-del'), add = e.target.closest('.lg-add');
+  if (!tag && !del && !add) return;
+  const r = rowFrom(e.target); if (!r) return;
+  if (tag){
+    const q = +tag.dataset.q;
+    if (r.to.includes(q)){ if (r.to.length === 1) return toast('At least one friend has to share this expense.'); r.to = r.to.filter(x => x !== q); }
+    else r.to = [...r.to, q].sort((a, b) => a - b);
+    if (r !== draft){ saveRow(r); calc(); }
+    renderLedger({id: r.id, sel: `.tag[data-q="${q}"]`});
+  } else if (del){
+    deleteEntry(r.id); calc(); renderLedger();
+  } else addDraft();
+});
+ledgerEl.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('.lg-new') && e.target.matches('input')) addDraft(); });
+function addDraft(){
+  if (!(toPaise(draft.amt) > 0)){ toast('Type an amount first.'); document.querySelector('.lg-new .lg-amt').focus(); return; }
+  saveRow({...draft, id: nextId++, at: draft.at || Date.now()});
+  draft = newDraft(draft);
+  calc(); renderLedger({id: 'new', sel: '.lg-amt'});
+}
 
 /* ---------- export as picture (drawn on a canvas, works offline) ---------- */
 const INK = '#2b2118';
@@ -421,7 +650,7 @@ function txt(ctx, text, x, y, size, align, maxW, color){
 }
 
 async function exportPicture(kind){
-  if (!last || !last.total) return;
+  if (!last || !last.active) return;
   const c = await renderPicture();
   const blob = await canvasBlob(c, 'image/png');
   const file = kind === 'pdf' ? await canvasPdf(c) : blob;
@@ -434,6 +663,129 @@ function downloadBlob(blob, name){
   a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ---------- ledger exports: picture, PDF, CSV and Excel (all written here, so they work offline) ---------- */
+function ledgerTable(){
+  return ledgerRows().map(r => ({at: r.at, type: typeName(r.type), by: nameOf(r.by), amt: toPaise(r.amt), to: forText(r), why: r.why.trim()}));
+}
+const LG_HEAD = ['Date & time', 'Type', 'Paid by', 'Amount (₹)', 'For / to', 'Note'];
+const isoAt = at => at ? localDT(at).replace('T', ' ') : '';
+async function exportLedger(x){
+  const rows = ledgerTable(); if (!rows.length) return;
+  if (x === 'lg-png' || x === 'lg-pdf'){
+    const c = await renderLedgerPicture(rows);
+    const blob = await canvasBlob(c, 'image/png');
+    return showPreview(x, {blob, file: x === 'lg-pdf' ? await canvasPdf(c) : blob, name: 'split-da-money-ledger.' + x.slice(3)});
+  }
+  const html = `<table class="ledger plain"><thead><tr>${LG_HEAD.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr><td>${esc(isoAt(r.at))}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td class="num">${(r.amt/100).toFixed(2)}</td><td>${esc(r.to)}</td><td>${esc(r.why)}</td></tr>`).join('')
+  }</tbody></table>`;
+  const file = x === 'csv' ? ledgerCsv(rows) : ledgerXlsx(rows);
+  showPreview(x, {html, file, name: 'split-da-money-ledger.' + x});
+}
+function ledgerCsv(rows){
+  const cell = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const lines = [LG_HEAD, ...rows.map(r => [isoAt(r.at), r.type, r.by, (r.amt/100).toFixed(2), r.to, r.why])].map(l => l.map(v => cell(String(v))).join(','));
+  return new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], {type: 'text/csv;charset=utf-8'});   // BOM so Excel reads UTF-8
+}
+
+// .xlsx = a zip of a few XML files; stored without compression, which every spreadsheet app accepts
+const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function zipStore(files){
+  const enc = new TextEncoder(), parts = [], central = [];
+  let off = 0;
+  const le = (n, bytes) => { const a = new Uint8Array(bytes); for (let i = 0; i < bytes; i++) a[i] = (n >>> (8*i)) & 255; return a; };
+  for (const [name, text] of files){
+    const nm = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const head = [le(0x04034b50,4), le(20,2), le(0x0800,2), le(0,2), le(0,2), le(0x21,2), le(crc,4), le(data.length,4), le(data.length,4), le(nm.length,2), le(0,2)];
+    central.push([le(0x02014b50,4), le(20,2), le(20,2), le(0x0800,2), le(0,2), le(0,2), le(0x21,2), le(crc,4), le(data.length,4), le(data.length,4),
+                  le(nm.length,2), le(0,2), le(0,2), le(0,2), le(0,2), le(0,4), le(off,4), nm]);
+    for (const b of [...head, nm, data]){ parts.push(b); off += b.length; }
+  }
+  const cdStart = off; let cdLen = 0;
+  central.flat().forEach(b => { parts.push(b); cdLen += b.length; });
+  parts.push(le(0x06054b50,4), le(0,2), le(0,2), le(files.length,2), le(files.length,2), le(cdLen,4), le(cdStart,4), le(0,2));
+  return new Blob(parts, {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function ledgerXlsx(rows){
+  const x = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const col = i => String.fromCharCode(65 + i);
+  const str = (r, i, v, st) => `<c r="${col(i)}${r}" t="inlineStr"${st ? ` s="${st}"` : ''}><is><t xml:space="preserve">${x(v)}</t></is></c>`;
+  const num = (r, i, v, st) => `<c r="${col(i)}${r}" s="${st}"><v>${v}</v></c>`;
+  // Excel dates are days since 1899-12-30, in local time
+  const serial = at => { const d = new Date(at); return (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) - Date.UTC(1899, 11, 30)) / 864e5; };
+  const total = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
+  const body = [
+    `<row r="1">${LG_HEAD.map((h, i) => str(1, i, h, 1)).join('')}</row>`,
+    ...rows.map((r, k) => { const n = k + 2;
+      return `<row r="${n}">${r.at ? num(n, 0, serial(r.at), 2) : str(n, 0, '')}${str(n, 1, r.type)}${str(n, 2, r.by)}${num(n, 3, (r.amt/100).toFixed(2), 3)}${str(n, 4, r.to)}${str(n, 5, r.why)}</row>`; }),
+    `<row r="${rows.length + 2}">${str(rows.length + 2, 2, 'Total spent', 1)}${num(rows.length + 2, 3, (total/100).toFixed(2), 4)}</row>`
+  ].join('');
+  const widths = [20, 12, 16, 14, 28, 36];
+  return zipStore([
+    ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
+    ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
+    ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Ledger" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm"/><numFmt numFmtId="165" formatCode="&quot;₹&quot;#,##0.00"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF3CC4CF"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
+    ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths.map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${body}</sheetData></worksheet>`]
+  ]);
+}
+
+async function renderLedgerPicture(rows){
+  try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
+  const W = xo.width === 'wide' ? 1200 : 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
+  const bx = pad + 26, bw = inner - 52, rowH = 38, headH = 40, pillH = 38;
+  const COLS_LG = [['Date & time', .24], ['Type', .12], ['Paid by', .14], ['Amount', .13, 'right'], ['For / to', .18], ['Note', .19]];
+  const shortAt = at => at ? new Date(at).toLocaleString(undefined, {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false}) : '—';
+  const tableH = headH + rows.length * rowH;
+  const panelH = 22 + pillH + 18 + tableH + 16 + 40 + 24;
+  const H = 88 + gap + panelH + gap + 52;
+  const c = document.createElement('canvas');
+  c.width = W*S; c.height = H*S;
+  const ctx = c.getContext('2d'); ctx.scale(S, S);
+  ctx.fillStyle = '#f5e6bc'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#f2bf5e'; ctx.fillRect(0, 0, W, 88);
+  ctx.fillStyle = INK; ctx.fillRect(0, 84, W, 4);
+  txt(ctx, '★ SPLIT-DA-MONEY', pad, 44, 30);
+  txt(ctx, new Date().toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'}), W-pad, 44, 15, 'right');
+
+  let y = 88 + gap;
+  box(ctx, pad, y, inner, panelH, '#c9e0a6', 'L');
+  ctx.font = '700 15px "Space Mono","Courier New",monospace';
+  box(ctx, bx, y + 22, ctx.measureText('LEDGER').width + 36, pillH, '#3cc4cf', 'L');
+  txt(ctx, 'LEDGER', bx + 18, y + 22 + pillH/2 + 1, 15);
+  const ty = y + 22 + pillH + 18;
+  box(ctx, bx, ty, bw, tableH + 8, '#fff7e0', 'M');
+  const cx = []; let acc = bx + 4;
+  COLS_LG.forEach(([, f]) => { cx.push(acc); acc += (bw - 8) * f; });
+  ctx.fillStyle = '#3cc4cf'; ctx.fillRect(bx + 4, ty + 4, bw - 8, headH);
+  ctx.fillStyle = INK; ctx.fillRect(bx + 4, ty + 4 + headH - 2, bw - 8, 2);
+  COLS_LG.forEach(([h, f, al], i) => {
+    const w = (bw - 8) * f;
+    txt(ctx, h.toUpperCase(), al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ty + 4 + headH/2, 12, al, w - 20);
+  });
+  rows.forEach((r, k) => {
+    const ry = ty + 4 + headH + k * rowH;
+    if (k % 2){ ctx.fillStyle = '#f7ebc6'; ctx.fillRect(bx + 4, ry, bw - 8, rowH); }
+    const vals = [shortAt(r.at), r.type, r.by, fmt(r.amt), r.to, r.why || '—'];
+    vals.forEach((v, i) => {
+      const [, f, al] = COLS_LG[i], w = (bw - 8) * f;
+      txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 1 && r.type === 'Paid back' ? '#2f7a3a' : INK);
+    });
+  });
+  const spent = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
+  const back = rows.filter(r => r.type === 'Paid back').reduce((s, r) => s + r.amt, 0);
+  const fy = ty + tableH + 8 + 16;
+  box(ctx, bx, fy, bw, 40, '#f5c542', 'M');
+  txt(ctx, `${rows.length} ${rows.length === 1 ? 'ENTRY' : 'ENTRIES'}  ·  TOTAL SPENT ${fmt(spent)}  ·  PAID BACK ${fmt(back)}`, bx + 16, fy + 21, 13, 'left', bw - 32);
+
+  ctx.fillStyle = '#e8808f'; ctx.fillRect(0, H-52, W, 52);
+  ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
+  txt(ctx, 'SPLIT-DA-MONEY', W/2, H-24, 13, 'center');
+  return c;
 }
 
 /* ---------- export settings: which sections, their order, width and cards per row (saved in this browser) ---------- */
@@ -468,7 +820,6 @@ function drawExportSettings(){
   document.querySelectorAll('#xs input[name="xs-width"]').forEach(r => r.checked = r.value === xo.width);
   document.querySelectorAll('#xs input[name="xs-cols"]').forEach(r => { r.checked = +r.value === xo.cols; r.disabled = !xo.on.paid; });
 }
-$('export-settings').addEventListener('click', () => { drawExportSettings(); $('xs').showModal(); });
 $('xs-done').addEventListener('click', () => $('xs').close());
 $('xs').addEventListener('click', e => { if (e.target === $('xs')) $('xs').close(); });
 $('xs-reset').addEventListener('click', () => { xo = defExport(); saveExport(); drawExportSettings(); });
@@ -505,7 +856,8 @@ async function renderPicture(){
     rows: !xo.lines ? [] : p.exps.filter(e => toPaise(e.amt) > 0).map(e => {
       const out = skipped(e, n).length && sharers(e, n).length < n ? skipped(e, n) : [];
       return {why: (e.why || '').trim() || '—', note: out.length ? '{not for ' + out.map(nameOf).join(', ') + '}' : '', amt: toPaise(e.amt)};
-    })
+    }).concat(!xo.lines ? [] : transfers.filter(t => t.from === i && t.to < n && toPaise(t.amt) > 0)
+      .map(t => ({why: 'Paid back to ' + nameOf(t.to), note: (t.why || '').trim(), amt: toPaise(t.amt)})))
   }));
 
   const W = WIDTHS[xo.width], pad = 28, S = 2, inner = W - 2*pad, gap = 28;
@@ -634,26 +986,39 @@ async function renderPicture(){
 }
 const canvasBlob = (c, type, q) => new Promise(res => c.toBlob(res, type, q));
 
-/* One-page PDF holding the picture as a JPEG, written by hand so it works offline with no library. */
+/* PDF holding the picture as JPEG pages, written by hand so it works offline with no library.
+   Page size in points = picture size in CSS px; very tall pictures are cut into pages (PDF pages max out at 14400pt). */
 async function canvasPdf(c){
-  const jpg = new Uint8Array(await (await canvasBlob(c, 'image/jpeg', 0.92)).arrayBuffer());
-  const w = c.width / 2, h = c.height / 2;          // page size in points = picture size in CSS px
+  const S = 2, W = c.width / S, H = c.height / S, MAXH = 14000;
+  const pages = [];
+  for (let top = 0; top < H; top += MAXH){
+    const h = Math.min(MAXH, H - top);
+    let src = c;
+    if (top || h < H){
+      src = document.createElement('canvas'); src.width = c.width; src.height = Math.round(h * S);
+      src.getContext('2d').drawImage(c, 0, Math.round(top * S), c.width, src.height, 0, 0, c.width, src.height);
+    }
+    pages.push({w: W, h, px: src.width, py: src.height, jpg: new Uint8Array(await (await canvasBlob(src, 'image/jpeg', 0.92)).arrayBuffer())});
+  }
   const enc = new TextEncoder(), parts = [], offs = [];
   let len = 0;
   const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
-  const obj = (body, stream) => {
-    offs.push(len);
-    put(`${offs.length} 0 obj\n${body}\n`);
+  const obj = (num, body, stream) => {
+    offs[num - 1] = len;
+    put(`${num} 0 obj\n${body}\n`);
     if (stream){ put('stream\n'); put(stream); put('\nendstream\n'); }
     put('endobj\n');
   };
-  const draw = enc.encode(`q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`);
+  // objects: 1 catalog, 2 page tree, then 3 per page (page, image, drawing)
   put('%PDF-1.4\n');
-  obj('<</Type/Catalog/Pages 2 0 R>>');
-  obj('<</Type/Pages/Kids[3 0 R]/Count 1>>');
-  obj(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${w} ${h}]/Resources<</XObject<</Im0 4 0 R>>>>/Contents 5 0 R>>`);
-  obj(`<</Type/XObject/Subtype/Image/Width ${c.width}/Height ${c.height}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${jpg.length}>>`, jpg);
-  obj(`<</Length ${draw.length}>>`, draw);
+  obj(1, '<</Type/Catalog/Pages 2 0 R>>');
+  obj(2, `<</Type/Pages/Kids[${pages.map((_, i) => `${3 + i*3} 0 R`).join(' ')}]/Count ${pages.length}>>`);
+  pages.forEach((p, i) => {
+    const n = 3 + i*3, draw = enc.encode(`q ${p.w} 0 0 ${p.h} 0 0 cm /Im0 Do Q`);
+    obj(n, `<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${p.w} ${p.h}]/Resources<</XObject<</Im0 ${n+1} 0 R>>>>/Contents ${n+2} 0 R>>`);
+    obj(n+1, `<</Type/XObject/Subtype/Image/Width ${p.px}/Height ${p.py}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${p.jpg.length}>>`, p.jpg);
+    obj(n+2, `<</Length ${draw.length}>>`, draw);
+  });
   const xref = len;
   put(`xref\n0 ${offs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join(''));
   put(`trailer\n<</Size ${offs.length + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF\n`);
@@ -812,5 +1177,8 @@ if (document.fonts) document.fonts.ready.then(relayout);
 
 (async () => {
   if (!await loadFromHash()) people = Array.from({length:3}, newFriend);
-  build();
+  let tab = 'split';
+  try { if (localStorage.getItem(TAB_KEY) === 'ledger') tab = 'ledger'; } catch(e){}
+  showTab(tab);
+  if (tab === 'ledger') build();       // the Split page is still drawn so its balances are ready
 })();   // open a shared link first, then draw

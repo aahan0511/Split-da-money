@@ -13,12 +13,28 @@
 
 <header class="bar">
   <h1>&#9733; <span>Split</span>-da-money</h1>
+  <nav class="tabs" role="tablist" aria-label="Pages">
+    <button class="px M btn tab" type="button" role="tab" data-tab="split" aria-selected="true">Split</button>
+    <button class="px M btn tab" type="button" role="tab" data-tab="ledger" aria-selected="false">Ledger</button>
+  </nav>
   <div class="tools">
     <button id="link" class="px L btn orange" type="button">Copy link</button>
-    <button id="export" class="px L btn blue" type="button" disabled>Export picture</button>
-    <button id="export-pdf" class="px L btn blue" type="button" disabled>Export PDF</button>
-    <button id="export-settings" class="px L btn" type="button" style="--fill:var(--cream)">Export settings</button>
-    <div class="px L btn pick"><select id="layout-preset" aria-label="Layout presets">
+    <div class="menu-wrap">
+      <button id="export-menu" class="px L btn blue" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-list">Export <span class="caret"></span></button>
+      <div id="export-list" class="px L menu" role="menu" hidden>
+        <div class="menu-h">Split</div>
+        <button type="button" role="menuitem" data-x="png">Picture (.png)</button>
+        <button type="button" role="menuitem" data-x="pdf">PDF</button>
+        <div class="menu-h">Ledger</div>
+        <button type="button" role="menuitem" data-x="lg-png">Ledger picture (.png)</button>
+        <button type="button" role="menuitem" data-x="lg-pdf">Ledger PDF</button>
+        <button type="button" role="menuitem" data-x="csv">Ledger CSV</button>
+        <button type="button" role="menuitem" data-x="xlsx">Ledger Excel (.xlsx)</button>
+        <div class="menu-h"></div>
+        <button type="button" role="menuitem" data-x="settings">Export settings&hellip;</button>
+      </div>
+    </div>
+    <div class="px L btn pick split-only"><select id="layout-preset" aria-label="Layout presets">
       <option value="">Layout&hellip;</option>
       <optgroup label="Panels">
         <option value="default">Default (stacked)</option>
@@ -36,7 +52,7 @@
   </div>
 </header>
 
-<main>
+<main id="page-split">
 <div id="board" class="board">
   <section class="px L panel" data-panel="friends" style="--fill:var(--sage)">
     <div class="gi-in">
@@ -61,6 +77,22 @@
 </div>
 </main>
 
+<main id="page-ledger" hidden>
+  <section class="px L panel" style="--fill:var(--sage)">
+    <div class="px L pill">Ledger</div>
+    <p class="hint">Every expense and every payment between friends, with its date and time. Changes here also change the Split page.
+      <b>Expense</b> is split between the friends you pick, <b>Paid for</b> is paid for one friend only, and <b>Paid back</b> is money one friend gives another.</p>
+    <div class="px M table-wrap">
+      <table class="ledger">
+        <thead><tr><th>Date &amp; time</th><th>Type</th><th>Paid by</th><th class="num">Amount (₹)</th><th>For / to</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead>
+        <tbody id="lg-new"></tbody>
+        <tbody id="lg-body"></tbody>
+      </table>
+    </div>
+    <div class="px M summary lg-total" id="lg-total"></div>
+  </section>
+</main>
+
 <dialog id="pv" class="px L preview" aria-labelledby="pv-title">
   <div class="px L pill" id="pv-title">Preview</div>
   <div id="pv-link">
@@ -79,6 +111,7 @@
     <a id="pv-open" class="px M btn" target="_blank" rel="noopener" style="--fill:var(--cream)">Open in new tab</a>
   </div>
   <div id="pv-img" class="px M pic" hidden><img id="pv-pic" alt="Preview of the exported picture"></div>
+  <div id="pv-table" class="px M pic tbl" hidden></div>
   <div class="pv-actions">
     <button id="pv-close" class="px M btn" type="button" style="--fill:var(--cream)">Cancel</button>
     <button id="pv-go" class="px M btn blue" type="button">Copy</button>
@@ -87,7 +120,7 @@
 
 <dialog id="xs" class="px L preview xs" aria-labelledby="xs-title">
   <div class="px L pill" id="xs-title">Export settings</div>
-  <p class="hint">These apply to Export picture and Export PDF.</p>
+  <p class="hint">These apply to the Split picture and PDF. The ledger picture uses the width too.</p>
   <div>
     <label>Sections (tick to include, arrows to reorder)</label>
     <ul id="xs-sections" class="xs-list"></ul>
