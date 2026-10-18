@@ -23,8 +23,8 @@
 
 const $ = id => document.getElementById(id);
 const nfEl = $('nf'), colsEl = $('cols');
-const newExp = () => ({amt:'', why:''});
-let people = [];        // [{name, exps:[{amt, why}]}]
+const newExp = () => ({amt:'', why:'', skip:[]});
+let people = [];        // [{name, exps:[{amt, why, skip:[friend indices left out], open}]}]
 let last = null;        // latest result, used for the picture
 
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
@@ -32,6 +32,10 @@ const nameOf = i => (people[i].name && people[i].name.trim()) || `Friend ${i+1}`
 const fmt = p => '₹' + (p/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const toPaise = a => Math.round((parseFloat(a) || 0) * 100);
 const count = () => Math.max(2, Math.min(30, parseInt(nfEl.value, 10) || 2));
+const tagText = i => Array.from((people[i].name || '').trim())[0]?.toUpperCase() || String(i+1);
+const skipped = (e, n) => e.skip.filter(q => q < n).sort((a,b) => a-b);
+// who shares an expense: everyone not left out (if somehow nobody is left, everyone shares it)
+const sharers = (e, n) => { const s = Array.from({length:n}, (_,q) => q).filter(q => !e.skip.includes(q)); return s.length ? s : Array.from({length:n}, (_,q) => q); };
 
 function build(focus){
   const n = count();
@@ -49,7 +53,15 @@ function build(focus){
            `<div class="exp" data-e="${j}">
               <div class="px M field"><input class="am" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(e.amt)}"></div>
               <div class="px M field"><input class="wy" placeholder="Reason (optional)" value="${esc(e.why)}"></div>
+              <button class="px M btn ex${e.open ? ' open' : ''}${skipped(e, n).length ? ' on' : ''}" type="button"
+                title="${skipped(e, n).length ? 'Not split with: ' + esc(skipped(e, n).map(nameOf).join(', ')) : 'Choose who shares this expense'}"
+                aria-label="Choose who shares this expense" aria-expanded="${!!e.open}"><span>&lsaquo;</span></button>
               <button class="px M btn rm" type="button" title="Remove this expense" aria-label="Remove expense">&times;</button>
+              ${e.open ? `<div class="tags"><span>Split with</span>${Array.from({length:n}, (_,q) => {
+                const off = e.skip.includes(q);
+                return `<button class="px M btn tag c${q%4}${off ? ' off' : ''}" type="button" data-q="${q}" aria-pressed="${!off}"
+                  title="${esc(nameOf(q))}${off ? ' (left out)' : ''}">${esc(tagText(q))}</button>`;
+              }).join('')}</div>` : ''}
             </div>`).join('')}
          </div>
        </div>
@@ -70,12 +82,23 @@ function calc(){
   const list = people.slice(0, n);
   const paid = list.map(p => p.exps.reduce((s,e) => s + toPaise(e.amt), 0));  // paise: no rounding errors
   const total = paid.reduce((a,b) => a+b, 0);
-  const base = Math.floor(total / n), rem = total - base * n;
-  const share = Array.from({length:n}, (_,i) => base + (i < rem ? 1 : 0));
+  // add up expenses shared by the same friends, then split each group in whole paise
+  const groups = new Map();
+  list.forEach(p => p.exps.forEach(e => {
+    const a = toPaise(e.amt); if (!a) return;
+    const k = sharers(e, n).join(',');
+    groups.set(k, (groups.get(k) || 0) + a);
+  }));
+  const share = Array(n).fill(0);
+  groups.forEach((a, k) => {
+    const s = k.split(',').map(Number), base = Math.floor(a / s.length), rem = a - base * s.length;
+    s.forEach((q, j) => share[q] += base + (j < rem ? 1 : 0));
+  });
+  const uneven = [...groups.keys()].some(k => k.split(',').length !== n);
   const bal = paid.map((p,i) => p - share[i]);                                // + gets back, - has to pay
 
   bal.forEach((b,i) => {
-    $('sub'+i).textContent = paid[i] ? `Total paid: ${fmt(paid[i])}` : '';
+    $('sub'+i).textContent = [paid[i] ? `Total paid: ${fmt(paid[i])}` : '', uneven ? `Share: ${fmt(share[i])}` : ''].filter(Boolean).join(' · ');
     const el = $('bal'+i);
     if (!total){ el.className = 'px M chip'; el.textContent = ''; }
     else if (b > 0){ el.className = 'px M chip gets'; el.textContent = `Gets back ${fmt(b)}`; }
@@ -85,7 +108,9 @@ function calc(){
 
   const sum = $('summary');
   sum.hidden = !total;
-  sum.textContent = `Total spent ${fmt(total)}. Each friend's fair share: ${fmt(total / n)}.`;
+  sum.textContent = uneven
+    ? `Total spent ${fmt(total)}. Some expenses leave friends out, so shares differ (see each friend).`
+    : `Total spent ${fmt(total)}. Each friend's fair share: ${fmt(total / n)}.`;
 
   const cr = [], db = [];
   bal.forEach((b,i) => { if (b>0) cr.push({i,v:b}); else if (b<0) db.push({i,v:-b}); });
@@ -105,7 +130,7 @@ function calc(){
   else ul.innerHTML = out.map(t =>
     `<li class="px M t"><span class="who">${esc(nameOf(t.from))}</span> gives <span class="who to">${esc(nameOf(t.to))}</span><span class="amt">${fmt(t.v)}</span></li>`).join('');
 
-  last = {n, paid, total, share: total / n, bal, out};
+  last = {n, paid, total, share, uneven, bal, out};
   $('export').disabled = $('export-pdf').disabled = !total;
   scheduleSync();
 }
@@ -121,7 +146,7 @@ function stateArray(){
   const n = count();
   return [n, people.slice(0, n).map(p => [
     p.name,
-    p.exps.filter(e => e.amt !== '' || e.why !== '').map(e => [e.amt, e.why])
+    p.exps.filter(e => e.amt !== '' || e.why !== '').map(e => e.skip.length ? [e.amt, e.why, [...e.skip].sort((a,b) => a-b)] : [e.amt, e.why])
   ])];
 }
 const hasData = () => stateArray()[1].some(p => p[0].trim() || p[1].length);
@@ -139,7 +164,8 @@ async function decodeState(code){
   const cl = (v, m) => String(v == null ? '' : v).slice(0, m);
   const nn = Math.max(2, Math.min(30, parseInt(n, 10) || 2));
   const ppl = (Array.isArray(list) ? list : []).slice(0, nn).map(p => {
-    const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 50).map(e => ({amt: cl(e[0], 20), why: cl(e[1], 200)}));
+    const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 50).map(e => ({amt: cl(e[0], 20), why: cl(e[1], 200),
+      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))]}));
     return {name: cl(p[0], 100), exps: exps.length ? exps : [newExp()]};
   });
   while (ppl.length < nn) ppl.push({name:'', exps:[newExp()]});
@@ -249,7 +275,11 @@ async function loadFromHash(){
 colsEl.addEventListener('input', e => {
   const f = e.target.closest('.friend'); if (!f) return;
   const p = people[+f.dataset.p];
-  if (e.target.classList.contains('nm')) p.name = e.target.value;
+  if (e.target.classList.contains('nm')){
+    p.name = e.target.value;
+    const q = +f.dataset.p;
+    colsEl.querySelectorAll(`.tag[data-q="${q}"]`).forEach(t => { t.textContent = tagText(q); t.title = nameOf(q) + (t.classList.contains('off') ? ' (left out)' : ''); });
+  }
   else {
     const row = e.target.closest('.exp'); if (!row) return;
     const ex = p.exps[+row.dataset.e];
@@ -264,6 +294,18 @@ colsEl.addEventListener('click', e => {
   if (e.target.closest('.add')){
     p.exps.push(newExp());
     build({p:pi});
+  } else if (e.target.closest('.ex')){
+    const j = +e.target.closest('.exp').dataset.e;
+    p.exps[j].open = !p.exps[j].open;
+    build();
+    colsEl.querySelector(`.friend[data-p="${pi}"] .exp[data-e="${j}"] .ex`).focus();
+  } else if (e.target.closest('.tag')){
+    const j = +e.target.closest('.exp').dataset.e, q = +e.target.closest('.tag').dataset.q, ex = p.exps[j];
+    if (ex.skip.includes(q)) ex.skip = ex.skip.filter(x => x !== q);
+    else if (skipped(ex, count()).length + 1 < count()) ex.skip.push(q);
+    else return toast('At least one friend has to share this expense.');
+    build();
+    colsEl.querySelector(`.friend[data-p="${pi}"] .exp[data-e="${j}"] .tag[data-q="${q}"]`).focus();
   } else if (e.target.closest('.rm')){
     const j = +e.target.closest('.exp').dataset.e;
     if (p.exps.length > 1) p.exps.splice(j, 1); else p.exps[0] = newExp();
@@ -336,13 +378,16 @@ function downloadBlob(blob, name){
 
 async function renderPicture(){
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
-  const {n, paid, total, share, bal, out} = last;
+  const {n, paid, total, share, uneven, bal, out} = last;
   const COLORS = ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'];
 
   // what each person paid (only lines with an amount)
   const blocks = people.slice(0, n).map((p, i) => ({
-    i, name: nameOf(i), paid: paid[i], bal: bal[i],
-    rows: p.exps.filter(e => toPaise(e.amt) > 0).map(e => ({why: (e.why || '').trim() || '—', amt: toPaise(e.amt)}))
+    i, name: nameOf(i), paid: paid[i], share: share[i], bal: bal[i],
+    rows: p.exps.filter(e => toPaise(e.amt) > 0).map(e => {
+      const out = skipped(e, n).length && sharers(e, n).length < n ? skipped(e, n) : [];
+      return {why: ((e.why || '').trim() || '—') + (out.length ? ' (not for ' + out.map(nameOf).join(', ') + ')' : ''), amt: toPaise(e.amt)};
+    })
   }));
 
   const W = 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
@@ -380,8 +425,13 @@ async function renderPicture(){
   box(ctx, pad, y, inner, 88, '#f5c542', 'L');
   txt(ctx, 'TOTAL SPENT', pad+30, y+32, 13);
   txt(ctx, fmt(total), pad+30, y+60, 26);
-  txt(ctx, 'EACH FRIEND SHOULD PAY', W/2+10, y+32, 13);
-  txt(ctx, fmt(Math.round(share)), W/2+10, y+60, 26);
+  if (uneven){
+    txt(ctx, 'FAIR SHARES', W/2+10, y+32, 13);
+    txt(ctx, 'Differ, see below', W/2+10, y+60, 18);
+  } else {
+    txt(ctx, 'EACH FRIEND SHOULD PAY', W/2+10, y+32, 13);
+    txt(ctx, fmt(Math.round(total / n)), W/2+10, y+60, 26);
+  }
   y += 88 + gap;
 
   // expenses: what was paid by whom and why
@@ -394,7 +444,8 @@ async function renderPicture(){
     box(ctx, bx, by, bw, h, COLORS[b.i % 4], 'M');
     const hy = by + 12 + 19;
     txt(ctx, b.name, bx+20, hy, 17, 'left', bw*0.32);
-    txt(ctx, 'PAID ' + fmt(b.paid), bx+bw*0.40, hy, 14);
+    if (uneven) txt(ctx, 'PAID ' + fmt(b.paid) + ' · SHARE ' + fmt(b.share), bx+bw*0.34, hy, 13, 'left', bw*0.66 - 230);
+    else txt(ctx, 'PAID ' + fmt(b.paid), bx+bw*0.40, hy, 14);
     const lab = b.bal > 0 ? 'GETS ' + fmt(b.bal) : b.bal < 0 ? 'PAYS ' + fmt(-b.bal) : 'ALL GOOD';
     const col = b.bal > 0 ? '#8fdc7a' : b.bal < 0 ? '#e2503a' : '#fff7e0';
     const cw = 200, cx = bx + bw - cw - 14;

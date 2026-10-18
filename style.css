@@ -77,8 +77,17 @@ a.btn{display:inline-block;text-decoration:none}
 .friend{padding:calc(var(--b) + 12px);display:flex;flex-direction:column;gap:12px;--fill:#f8dc8f}
 .friend.c1{--fill:#c3e8ec} .friend.c2{--fill:#f6c9b6} .friend.c3{--fill:#e6efc9}
 .exps{display:flex;flex-direction:column;gap:8px}
-.exp{display:grid;grid-template-columns:92px minmax(0,1fr) 38px;gap:8px;align-items:stretch}
+.exp{display:grid;grid-template-columns:84px minmax(0,1fr) 34px 34px;gap:8px;align-items:stretch}
 .rm{--fill:var(--red);color:#fff;padding:0;font-size:18px;line-height:1}
+.ex{--fill:var(--cream);padding:0;font-size:22px;line-height:1}
+.ex span{display:inline-block;transition:transform .15s}
+.ex.open span{transform:rotate(-90deg)}
+.ex.on{--fill:var(--orange)}
+.tags{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.tags span{font-size:11px;text-transform:uppercase;margin-right:2px}
+.tag{width:32px;height:32px;padding:0;font-size:13px;--fill:#f8dc8f}
+.tag.c1{--fill:#c3e8ec} .tag.c2{--fill:#f6c9b6} .tag.c3{--fill:#e6efc9}
+.tag.off{--fill:#d8d0b8;color:#8b836e;text-decoration:line-through}
 .add{--fill:var(--cream);width:100%;font-size:12px}
 .add:hover::before{filter:none}
 .add:hover{--fill:var(--yellow)}
