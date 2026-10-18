@@ -32,6 +32,13 @@ const nameOf = i => (people[i].name && people[i].name.trim()) || `Friend ${i+1}`
 const fmt = p => '₹' + (p/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const toPaise = a => Math.round((parseFloat(a) || 0) * 100);
 const count = () => Math.max(2, Math.min(30, parseInt(nfEl.value, 10) || 2));
+// pixel-art icons: '#' = one 2px pixel, drawn as crisp SVG squares
+const pixIcon = rows => {
+  const d = rows.flatMap((r, y) => [...r].map((c, x) => c === '#' ? `M${x} ${y}h1v1h-1z` : '')).join('');
+  return `<svg width="${rows[0].length*2}" height="${rows.length*2}" viewBox="0 0 ${rows[0].length} ${rows.length}" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
+};
+const ICON_OPEN = pixIcon(['...##','..##.','.##..','##...','##...','.##..','..##.','...##']);
+const ICON_RM   = pixIcon(['##....##','.##..##.','..####..','...##...','...##...','..####..','.##..##.','##....##']);
 const tagText = i => Array.from((people[i].name || '').trim())[0]?.toUpperCase() || String(i+1);
 const skipped = (e, n) => e.skip.filter(q => q < n).sort((a,b) => a-b);
 // who shares an expense: everyone not left out (if somehow nobody is left, everyone shares it)
@@ -55,8 +62,8 @@ function build(focus){
               <div class="px M field"><input class="wy" placeholder="Reason (optional)" value="${esc(e.why)}"></div>
               <button class="px M btn ex${e.open ? ' open' : ''}${skipped(e, n).length ? ' on' : ''}" type="button"
                 title="${skipped(e, n).length ? 'Not split with: ' + esc(skipped(e, n).map(nameOf).join(', ')) : 'Choose who shares this expense'}"
-                aria-label="Choose who shares this expense" aria-expanded="${!!e.open}"><span>&lsaquo;</span></button>
-              <button class="px M btn rm" type="button" title="Remove this expense" aria-label="Remove expense">&times;</button>
+                aria-label="Choose who shares this expense" aria-expanded="${!!e.open}">${ICON_OPEN}</button>
+              <button class="px M btn rm" type="button" title="Remove this expense" aria-label="Remove expense">${ICON_RM}</button>
               ${e.open ? `<div class="tags"><span>Split with</span>${Array.from({length:n}, (_,q) => {
                 const off = e.skip.includes(q);
                 return `<button class="px M btn tag c${q%4}${off ? ' off' : ''}" type="button" data-q="${q}" aria-pressed="${!off}"
@@ -386,7 +393,7 @@ async function renderPicture(){
     i, name: nameOf(i), paid: paid[i], share: share[i], bal: bal[i],
     rows: p.exps.filter(e => toPaise(e.amt) > 0).map(e => {
       const out = skipped(e, n).length && sharers(e, n).length < n ? skipped(e, n) : [];
-      return {why: ((e.why || '').trim() || '—') + (out.length ? ' (not for ' + out.map(nameOf).join(', ') + ')' : ''), amt: toPaise(e.amt)};
+      return {why: ((e.why || '').trim() || '—') + (out.length ? ' {not for ' + out.map(nameOf).join(', ') + '}' : ''), amt: toPaise(e.amt)};
     })
   }));
 

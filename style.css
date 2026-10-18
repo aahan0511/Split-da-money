@@ -78,10 +78,12 @@ a.btn{display:inline-block;text-decoration:none}
 .friend.c1{--fill:#c3e8ec} .friend.c2{--fill:#f6c9b6} .friend.c3{--fill:#e6efc9}
 .exps{display:flex;flex-direction:column;gap:8px}
 .exp{display:grid;grid-template-columns:84px minmax(0,1fr) 34px 34px;gap:8px;align-items:stretch}
-.rm{--fill:var(--red);color:#fff;padding:0;font-size:18px;line-height:1}
-.ex{--fill:var(--cream);padding:0;font-size:22px;line-height:1}
-.ex span{display:inline-block;transition:transform .15s}
-.ex.open span{transform:rotate(-90deg)}
+.rm,.ex{padding:0;display:flex;align-items:center;justify-content:center}
+.rm svg,.ex svg{display:block}
+.rm{--fill:var(--red);color:#fff}
+.ex{--fill:var(--cream)}
+.ex svg{transition:transform .15s}
+.ex.open svg{transform:rotate(-90deg)}
 .ex.on{--fill:var(--orange)}
 .tags{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .tags span{font-size:11px;text-transform:uppercase;margin-right:2px}
