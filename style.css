@@ -45,6 +45,25 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .btn.orange{--fill:var(--orange)}
 
 .tools{display:flex;gap:14px;flex-wrap:wrap}
+.toggle{display:flex;align-items:center;gap:8px;margin:0;padding:calc(var(--b) + 8px) 14px;--fill:var(--cream);
+        font-size:13px;cursor:pointer;user-select:none}
+.toggle input{width:16px;height:16px;margin:0;accent-color:var(--ink);cursor:pointer}
+
+/* ---------- preview dialog ---------- */
+.preview{--fill:var(--sage);width:min(720px,calc(100vw - 32px));max-height:calc(100vh - 32px);
+         padding:calc(var(--b) + 18px);color:var(--ink);overflow:auto}
+.preview[open]{display:flex;flex-direction:column;gap:14px}
+.preview::backdrop{background:rgba(43,33,24,.55)}
+.preview .pill{margin:0;align-self:flex-start}
+.preview .hint{margin:8px 0 12px}
+#pv-link[hidden],#pv-img[hidden]{display:none}
+textarea{display:block;width:100%;font:400 12px/1.5 var(--font);color:var(--ink);background:transparent;
+         border:0;padding:0;outline:none;resize:vertical;word-break:break-all}
+a.btn{display:inline-block;text-decoration:none}
+.pic{--fill:#fffaf0;padding:calc(var(--b) + 8px)}
+.pic img{display:block;width:100%;height:auto;max-height:60vh;object-fit:contain}
+.pv-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}
+
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);--fill:var(--yellow);
        padding:calc(var(--b) + 8px) 16px;max-width:min(560px,calc(100vw - 32px));font-size:12px;z-index:10;
        filter:drop-shadow(4px 4px 0 rgba(43,33,24,.32))}

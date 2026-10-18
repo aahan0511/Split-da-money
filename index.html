@@ -16,6 +16,7 @@
   <div class="tools">
     <button id="link" class="px L btn orange" type="button">Copy link</button>
     <button id="export" class="px L btn blue" type="button" disabled>Export picture</button>
+    <label class="px M toggle"><input id="preview" type="checkbox" checked> Preview first</label>
   </div>
 </header>
 
@@ -40,6 +41,20 @@
     <ul id="settle"><li class="px M">Type the amounts above.</li></ul>
   </section>
 </main>
+
+<dialog id="pv" class="px L preview" aria-labelledby="pv-title">
+  <div class="px L pill" id="pv-title">Preview</div>
+  <div id="pv-link">
+    <div class="px M field"><textarea id="pv-url" rows="4" readonly aria-label="Share link"></textarea></div>
+    <p class="hint" id="pv-info"></p>
+    <a id="pv-open" class="px M btn" target="_blank" rel="noopener" style="--fill:var(--cream)">Open in new tab</a>
+  </div>
+  <div id="pv-img" class="px M pic" hidden><img id="pv-pic" alt="Preview of the exported picture"></div>
+  <div class="pv-actions">
+    <button id="pv-close" class="px M btn" type="button" style="--fill:var(--cream)">Cancel</button>
+    <button id="pv-go" class="px M btn blue" type="button">Copy</button>
+  </div>
+</dialog>
 
 <div id="toast" class="px M toast" role="status" hidden></div>
 

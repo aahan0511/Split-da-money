@@ -176,14 +176,61 @@ async function copyText(text){
 async function copyLink(){
   const url = await shareUrl();
   try { history.replaceState(null, '', url); } catch(e){}
+  if (previewOn()) return showPreview('link', url);
+  await doCopyLink(url);
+}
+async function doCopyLink(url){
   if (await copyText(url)){
     toast(location.protocol === 'file:'
-      ? 'Link copied! It only opens on this computer. Put split-da-money.html online (any web host) so friends can open it.'
+      ? 'Link copied! It only opens on this computer. Put index.html online (any web host) so friends can open it.'
       : 'Link copied! Anyone who opens it sees these details and can edit them.', location.protocol === 'file:' ? 7000 : 3500);
   } else {
     window.prompt('Copy this link:', url);
   }
 }
+
+/* ---------- preview before copying / downloading ---------- */
+const PREVIEW_KEY = 'sdm-preview';
+const previewOn = () => $('preview').checked;
+try { $('preview').checked = localStorage.getItem(PREVIEW_KEY) !== '0'; } catch(e){}
+$('preview').addEventListener('change', () => {
+  try { localStorage.setItem(PREVIEW_KEY, previewOn() ? '1' : '0'); } catch(e){}
+});
+
+let pv = null;          // what the open preview will copy / download: {kind, url, blob}
+function showPreview(kind, data){
+  closePreview();
+  const isLink = kind === 'link';
+  pv = isLink ? {kind, url: data} : {kind, blob: data, url: URL.createObjectURL(data)};
+  $('pv-title').textContent = isLink ? 'Preview link' : 'Preview picture';
+  $('pv-go').textContent = isLink ? 'Copy link' : 'Download';
+  $('pv-link').hidden = !isLink;
+  $('pv-img').hidden = isLink;
+  if (isLink){
+    $('pv-url').value = data;
+    $('pv-open').href = data;
+    $('pv-info').textContent = `${data.length} characters · ${count()} friends · total ${last && last.total ? fmt(last.total) : fmt(0)}`;
+  } else {
+    $('pv-pic').src = pv.url;
+  }
+  $('pv').showModal();
+}
+function closePreview(){
+  if (pv && pv.blob) URL.revokeObjectURL(pv.url);
+  pv = null;
+  $('pv-pic').removeAttribute('src');
+  if ($('pv').open) $('pv').close();
+}
+$('pv-go').addEventListener('click', async () => {
+  const cur = pv; if (!cur) return;
+  if (cur.kind === 'link') await doCopyLink(cur.url);
+  else downloadBlob(cur.blob);
+  closePreview();
+});
+$('pv-close').addEventListener('click', closePreview);
+$('pv').addEventListener('close', () => { if (pv) closePreview(); });   // Esc key
+$('pv').addEventListener('click', e => { if (e.target === $('pv')) closePreview(); });   // click on the backdrop
+$('pv-url').addEventListener('focus', e => e.target.select());
 
 async function loadFromHash(){
   const m = location.hash.match(/^#d=([rz][A-Za-z0-9_-]*)$/);
@@ -271,6 +318,19 @@ function txt(ctx, text, x, y, size, align, maxW, color){
 
 async function exportPicture(){
   if (!last || !last.total) return;
+  const blob = await renderPicture();
+  if (previewOn()) showPreview('picture', blob);
+  else downloadBlob(blob);
+}
+function downloadBlob(blob){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'split-da-money.png';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+async function renderPicture(){
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
   const {n, paid, total, share, bal, out} = last;
   const COLORS = ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'];
@@ -370,13 +430,7 @@ async function exportPicture(){
   ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
   txt(ctx, 'SPLIT-DA-MONEY', W/2, H-24, 13, 'center');
 
-  c.toBlob(blob => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'split-da-money.png';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  }, 'image/png');
+  return new Promise(res => c.toBlob(res, 'image/png'));
 }
 
 (async () => { await loadFromHash(); build(); })();   // open a shared link first, then draw
