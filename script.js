@@ -106,7 +106,7 @@ function calc(){
     `<li class="px M t"><span class="who">${esc(nameOf(t.from))}</span> gives <span class="who to">${esc(nameOf(t.to))}</span><span class="amt">${fmt(t.v)}</span></li>`).join('');
 
   last = {n, paid, total, share: total / n, bal, out};
-  $('export').disabled = !total;
+  $('export').disabled = $('export-pdf').disabled = !total;
   scheduleSync();
 }
 
@@ -197,13 +197,13 @@ $('preview').addEventListener('change', () => {
   try { localStorage.setItem(PREVIEW_KEY, previewOn() ? '1' : '0'); } catch(e){}
 });
 
-let pv = null;          // what the open preview will copy / download: {kind, url, blob}
+let pv = null;          // what the open preview will copy / download: {kind, url} or {kind, url, blob, file, name}
 function showPreview(kind, data){
   closePreview();
   const isLink = kind === 'link';
-  pv = isLink ? {kind, url: data} : {kind, blob: data, url: URL.createObjectURL(data)};
-  $('pv-title').textContent = isLink ? 'Preview link' : 'Preview picture';
-  $('pv-go').textContent = isLink ? 'Copy link' : 'Download';
+  pv = isLink ? {kind, url: data} : {kind, ...data, url: URL.createObjectURL(data.blob)};
+  $('pv-title').textContent = isLink ? 'Preview link' : kind === 'pdf' ? 'Preview PDF' : 'Preview picture';
+  $('pv-go').textContent = isLink ? 'Copy link' : kind === 'pdf' ? 'Download PDF' : 'Download';
   $('pv-link').hidden = !isLink;
   $('pv-img').hidden = isLink;
   if (isLink){
@@ -224,7 +224,7 @@ function closePreview(){
 $('pv-go').addEventListener('click', async () => {
   const cur = pv; if (!cur) return;
   if (cur.kind === 'link') await doCopyLink(cur.url);
-  else downloadBlob(cur.blob);
+  else downloadBlob(cur.file, cur.name);
   closePreview();
 });
 $('pv-close').addEventListener('click', closePreview);
@@ -272,7 +272,8 @@ colsEl.addEventListener('click', e => {
 });
 nfEl.addEventListener('input', () => build());
 $('reset').addEventListener('click', () => { people.forEach(p => p.exps = [newExp()]); build(); });
-$('export').addEventListener('click', exportPicture);
+$('export').addEventListener('click', () => exportPicture('png'));
+$('export-pdf').addEventListener('click', () => exportPicture('pdf'));
 $('link').addEventListener('click', copyLink);
 window.addEventListener('hashchange', async () => { if (await loadFromHash()) build(); });
 
@@ -316,16 +317,19 @@ function txt(ctx, text, x, y, size, align, maxW, color){
   ctx.fillText(maxW ? fit(ctx, text, maxW) : text, x, y);
 }
 
-async function exportPicture(){
+async function exportPicture(kind){
   if (!last || !last.total) return;
-  const blob = await renderPicture();
-  if (previewOn()) showPreview('picture', blob);
-  else downloadBlob(blob);
+  const c = await renderPicture();
+  const blob = await canvasBlob(c, 'image/png');
+  const file = kind === 'pdf' ? await canvasPdf(c) : blob;
+  const name = 'split-da-money.' + kind;
+  if (previewOn()) showPreview(kind, {blob, file, name});
+  else downloadBlob(file, name);
 }
-function downloadBlob(blob){
+function downloadBlob(blob, name){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'split-da-money.png';
+  a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
@@ -430,7 +434,34 @@ async function renderPicture(){
   ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
   txt(ctx, 'SPLIT-DA-MONEY', W/2, H-24, 13, 'center');
 
-  return new Promise(res => c.toBlob(res, 'image/png'));
+  return c;
+}
+const canvasBlob = (c, type, q) => new Promise(res => c.toBlob(res, type, q));
+
+/* One-page PDF holding the picture as a JPEG, written by hand so it works offline with no library. */
+async function canvasPdf(c){
+  const jpg = new Uint8Array(await (await canvasBlob(c, 'image/jpeg', 0.92)).arrayBuffer());
+  const w = c.width / 2, h = c.height / 2;          // page size in points = picture size in CSS px
+  const enc = new TextEncoder(), parts = [], offs = [];
+  let len = 0;
+  const put = x => { const b = typeof x === 'string' ? enc.encode(x) : x; parts.push(b); len += b.length; };
+  const obj = (body, stream) => {
+    offs.push(len);
+    put(`${offs.length} 0 obj\n${body}\n`);
+    if (stream){ put('stream\n'); put(stream); put('\nendstream\n'); }
+    put('endobj\n');
+  };
+  const draw = enc.encode(`q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`);
+  put('%PDF-1.4\n');
+  obj('<</Type/Catalog/Pages 2 0 R>>');
+  obj('<</Type/Pages/Kids[3 0 R]/Count 1>>');
+  obj(`<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${w} ${h}]/Resources<</XObject<</Im0 4 0 R>>>>/Contents 5 0 R>>`);
+  obj(`<</Type/XObject/Subtype/Image/Width ${c.width}/Height ${c.height}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${jpg.length}>>`, jpg);
+  obj(`<</Length ${draw.length}>>`, draw);
+  const xref = len;
+  put(`xref\n0 ${offs.length + 1}\n0000000000 65535 f \n` + offs.map(o => String(o).padStart(10, '0') + ' 00000 n \n').join(''));
+  put(`trailer\n<</Size ${offs.length + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, {type: 'application/pdf'});
 }
 
 (async () => { await loadFromHash(); build(); })();   // open a shared link first, then draw
