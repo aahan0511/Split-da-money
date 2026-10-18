@@ -22,8 +22,7 @@ header.bar{background:var(--bar);border-bottom:4px solid var(--ink);padding:16px
            display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:22px;text-transform:uppercase;letter-spacing:1px}
 h1 span{background:var(--cream);padding:0 6px}
-main{max-width:920px;margin:0 auto;padding:30px 16px 48px;display:flex;flex-direction:column;gap:28px;
-     filter:drop-shadow(6px 6px 0 rgba(43,33,24,.32))}
+main{max-width:1200px;margin:0 auto;padding:30px 16px 20px;filter:drop-shadow(6px 6px 0 rgba(43,33,24,.32))}
 .panel{padding:calc(var(--b) + 18px)}
 .pill{display:inline-block;--fill:var(--cyan);padding:calc(var(--b) + 3px) 16px;margin-bottom:16px;font-size:14px;text-transform:uppercase}
 label{display:block;font-size:12px;text-transform:uppercase;margin-bottom:4px}
@@ -69,12 +68,35 @@ a.btn{display:inline-block;text-decoration:none}
        filter:drop-shadow(4px 4px 0 rgba(43,33,24,.32))}
 .toast[hidden]{display:none}
 
-.setup{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.setup .num{width:110px}
+.setup{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+
+/* ---------- snap-to-grid layout ---------- */
+main,.cols{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:8px}
+main{column-gap:28px}
+main:not(.ready){visibility:hidden}
+main > [data-panel],main > .gph{grid-column:1/-1;margin-bottom:28px}
+.cols{column-gap:22px;margin-bottom:-22px}
+.cols > .friend,.cols > .gph{margin-bottom:22px}
+.gph{border:3px dashed rgba(43,33,24,.45)}
+.dragging{z-index:5;opacity:.92}
+.is-dragging,.is-dragging *{cursor:grabbing !important;user-select:none}
+.grip{width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;--fill:var(--cream);cursor:grab;touch-action:none}
+.panel > .grip{position:absolute;top:calc(var(--b) + 14px);right:calc(var(--b) + 14px)}
+.sizer{position:absolute;right:calc(var(--b) + 5px);bottom:calc(var(--b) + 5px);width:14px;height:14px;display:flex;
+       align-items:flex-end;justify-content:flex-end;cursor:nwse-resize;touch-action:none;opacity:.6}
+.sizer:hover{opacity:1}
+.grip,.sizer{user-select:none;-webkit-user-select:none}
+.sizer svg{display:block}
 
 /* ---------- friends ---------- */
-.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:22px;align-items:start}
-.friend{padding:calc(var(--b) + 12px);display:flex;flex-direction:column;gap:12px;--fill:#f8dc8f}
+.friend{padding:calc(var(--b) + 12px);--fill:#f8dc8f}
+.friend > .gi-in{display:flex;flex-direction:column;gap:12px}
+.card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+.card-top label{margin:0}
+.gtools{display:flex;gap:6px}
+.gtools .grip,.rmf{width:26px;height:26px}
+.rmf{--fill:var(--red);color:#fff;padding:0;display:flex;align-items:center;justify-content:center}
+.rmf svg{display:block;width:12px;height:12px}
 .friend.c1{--fill:#c3e8ec} .friend.c2{--fill:#f6c9b6} .friend.c3{--fill:#e6efc9}
 .exps{display:flex;flex-direction:column;gap:8px}
 .exp{display:grid;grid-template-columns:84px minmax(0,1fr) 34px 34px;gap:8px;align-items:stretch}

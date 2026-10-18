@@ -22,7 +22,7 @@
 })();
 
 const $ = id => document.getElementById(id);
-const nfEl = $('nf'), colsEl = $('cols');
+const colsEl = $('cols'), boardEl = $('board');
 const newExp = () => ({amt:'', why:'', skip:[]});
 let people = [];        // [{name, exps:[{amt, why, skip:[friend indices left out], open}]}]
 let last = null;        // latest result, used for the picture
@@ -31,13 +31,17 @@ const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(
 const nameOf = i => (people[i].name && people[i].name.trim()) || `Friend ${i+1}`;
 const fmt = p => '₹' + (p/100).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const toPaise = a => Math.round((parseFloat(a) || 0) * 100);
-const count = () => Math.max(2, Math.min(30, parseInt(nfEl.value, 10) || 2));
+const MIN_FRIENDS = 2, MAX_FRIENDS = 30;
+const newFriend = () => ({name:'', exps:[newExp()]});
+const count = () => people.length;
 // pixel-art icons: '#' = one 2px pixel, drawn as crisp SVG squares
 const pixIcon = rows => {
   const d = rows.flatMap((r, y) => [...r].map((c, x) => c === '#' ? `M${x} ${y}h1v1h-1z` : '')).join('');
   return `<svg width="${rows[0].length*2}" height="${rows.length*2}" viewBox="0 0 ${rows[0].length} ${rows.length}" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="${d}"/></svg>`;
 };
 const ICON_OPEN = pixIcon(['...##','..##.','.##..','##...','##...','.##..','..##.','...##']);
+const ICON_GRIP = pixIcon(['##.##','##.##','.....','##.##','##.##','.....','##.##','##.##']);
+const ICON_SIZE = pixIcon(['.....#','......','...#.#','......','.#.#.#','......']);
 const ICON_RM   = pixIcon(['##....##','.##..##.','..####..','...##...','...##...','..####..','.##..##.','##....##']);
 const tagText = i => Array.from((people[i].name || '').trim())[0]?.toUpperCase() || String(i+1);
 const skipped = (e, n) => e.skip.filter(q => q < n).sort((a,b) => a-b);
@@ -46,7 +50,6 @@ const sharers = (e, n) => { const s = Array.from({length:n}, (_,q) => q).filter(
 
 function build(focus){
   const n = count();
-  while (people.length < n) people.push({name:'', exps:[newExp()]});   // data of hidden friends is kept
   colsEl.innerHTML = '';
   for (let i = 0; i < n; i++){
     const p = people[i];
@@ -54,7 +57,11 @@ function build(focus){
     d.className = `px M friend c${i%4}`;
     d.dataset.p = i;
     d.innerHTML =
-      `<div><label>Name</label><div class="px M field"><input class="nm" placeholder="Friend ${i+1}" value="${esc(p.name)}"></div></div>
+      `<div class="gi-in">
+       <div><div class="card-top"><label>Name</label><span class="gtools">
+         <button class="px M btn grip" type="button" title="Drag to move" aria-label="Move ${esc(nameOf(i))}">${ICON_GRIP}</button>
+         ${n > MIN_FRIENDS ? `<button class="px M btn rmf" type="button" title="Remove this friend" aria-label="Remove ${esc(nameOf(i))}">${ICON_RM}</button>` : ''}
+       </span></div><div class="px M field"><input class="nm" placeholder="Friend ${i+1}" value="${esc(p.name)}"></div></div>
        <div><label>Paid (₹) &amp; reason</label>
          <div class="exps">${p.exps.map((e,j) =>
            `<div class="exp" data-e="${j}">
@@ -74,12 +81,15 @@ function build(focus){
        </div>
        <button class="px M btn add" type="button">+ Add expense</button>
        <div class="sub" id="sub${i}"></div>
-       <div class="px M chip" id="bal${i}"></div>`;
+       <div class="px M chip" id="bal${i}"></div>
+       </div>
+       <span class="sizer" title="Drag to resize">${ICON_SIZE}</span>`;
     colsEl.appendChild(d);
   }
+  $('add-friend').disabled = n >= MAX_FRIENDS;
   calc();
   if (focus){
-    const el = colsEl.querySelector(`.friend[data-p="${focus.p}"] .exp:last-child .am`);
+    const el = colsEl.querySelector(focus.name ? `.friend[data-p="${focus.p}"] .nm` : `.friend[data-p="${focus.p}"] .exp:last-child .am`);
     if (el) el.focus();
   }
 }
@@ -140,6 +150,7 @@ function calc(){
   last = {n, paid, total, share, uneven, bal, out};
   $('export').disabled = $('export-pdf').disabled = !total;
   scheduleSync();
+  relayout();
 }
 
 /* ---------- share link: the whole state lives in the URL hash ---------- */
@@ -169,13 +180,13 @@ async function decodeState(code){
   else if (code[0] !== 'r') throw new Error('unknown format');
   const [n, list] = JSON.parse(new TextDecoder().decode(bytes));
   const cl = (v, m) => String(v == null ? '' : v).slice(0, m);
-  const nn = Math.max(2, Math.min(30, parseInt(n, 10) || 2));
+  const nn = Math.max(MIN_FRIENDS, Math.min(MAX_FRIENDS, parseInt(n, 10) || MIN_FRIENDS));
   const ppl = (Array.isArray(list) ? list : []).slice(0, nn).map(p => {
     const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 50).map(e => ({amt: cl(e[0], 20), why: cl(e[1], 200),
       skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))]}));
     return {name: cl(p[0], 100), exps: exps.length ? exps : [newExp()]};
   });
-  while (ppl.length < nn) ppl.push({name:'', exps:[newExp()]});
+  while (ppl.length < nn) ppl.push(newFriend());
   return {n: nn, people: ppl};
 }
 async function shareUrl(){
@@ -270,7 +281,7 @@ async function loadFromHash(){
   if (!m) return false;
   try {
     const s = await decodeState(m[1]);
-    people = s.people; nfEl.value = s.n;
+    people = s.people;
     return true;
   } catch(e){
     toast('This link looks broken, so it could not be opened.', 5000);
@@ -313,13 +324,25 @@ colsEl.addEventListener('click', e => {
     else return toast('At least one friend has to share this expense.');
     build();
     colsEl.querySelector(`.friend[data-p="${pi}"] .exp[data-e="${j}"] .tag[data-q="${q}"]`).focus();
+  } else if (e.target.closest('.rmf')){
+    if (people.length <= MIN_FRIENDS) return;
+    people.splice(pi, 1);
+    people.forEach(q => q.exps.forEach(ex => ex.skip = ex.skip.filter(x => x !== pi).map(x => x > pi ? x - 1 : x)));
+    layout.cards.splice(pi, 1); saveLayout();
+    build();
   } else if (e.target.closest('.rm')){
     const j = +e.target.closest('.exp').dataset.e;
     if (p.exps.length > 1) p.exps.splice(j, 1); else p.exps[0] = newExp();
     build();
   }
 });
-nfEl.addEventListener('input', () => build());
+$('add-friend').addEventListener('click', () => {
+  if (people.length >= MAX_FRIENDS) return;
+  const i = people.length;
+  people.push(newFriend());
+  layout.cards[i] = defCard(i, true); saveLayout();
+  build({p:i, name:true});
+});
 $('reset').addEventListener('click', () => { people.forEach(p => p.exps = [newExp()]); build(); });
 $('export').addEventListener('click', () => exportPicture('png'));
 $('export-pdf').addEventListener('click', () => exportPicture('pdf'));
@@ -522,4 +545,141 @@ async function canvasPdf(c){
   return new Blob(parts, {type: 'application/pdf'});
 }
 
-(async () => { await loadFromHash(); build(); })();   // open a shared link first, then draw
+/* ---------- layout: snap-to-grid dashboard, saved in this browser ----------
+   Panels and friend cards sit on a 12-column grid with 8px rows. Each block has a stored box {x, y, w, h}
+   (h = 0 means "as tall as its content"); blocks fall upward to fill gaps and never overlap. */
+const COLS = 12, ROW = 8, LAYOUT_KEY = 'sdm-layout';
+const defPanels = () => ({friends:{x:0, y:0, w:12, h:0}, results:{x:0, y:1, w:12, h:0}});
+const defCard = (i, last) => ({x:(i % 3) * 4, y:last ? 1e6 : i, w:4, h:0});
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const goodBox = b => b && ['x','y','w','h'].every(k => Number.isFinite(b[k]));
+function loadLayout(){
+  const l = {panels: defPanels(), cards: []};
+  try {
+    const s = JSON.parse(localStorage.getItem(LAYOUT_KEY));
+    if (s && s.panels) for (const k in l.panels) if (goodBox(s.panels[k])) l.panels[k] = s.panels[k];
+    if (s && Array.isArray(s.cards)) l.cards = s.cards.map((b, i) => goodBox(b) ? b : defCard(i));
+  } catch(e){}
+  return l;
+}
+const saveLayout = () => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch(e){} };
+let layout = loadLayout();
+const cardBox = i => layout.cards[i] || (layout.cards[i] = defCard(i));
+
+const GRIDS = {
+  cols: {el: colsEl, gap: 22, minPx: 280,
+         items: () => [...colsEl.querySelectorAll(':scope > .friend')].map(el => ({el, box: cardBox(+el.dataset.p)}))},
+  main: {el: boardEl, gap: 28, minPx: 320,
+         items: () => [...boardEl.querySelectorAll(':scope > [data-panel]')].map(el => ({el, box: layout.panels[el.dataset.panel]}))}
+};
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+// place blocks in reading order, each one as high as it fits; the block being dragged goes first on ties.
+// When the grid is too narrow for some block's chosen width, all blocks get equal columns instead.
+function pack(its, minW, pinned){
+  const forced = its.some(it => it.box.w < minW), per = Math.floor(COLS / minW), fw = Math.floor(COLS / per);
+  its.forEach(it => { it.h = Math.max(it.box.h, it.need); });
+  its.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.box === pinned ? -1 : b.box === pinned ? 1 : 0));
+  its.forEach((it, j) => {
+    it.w = forced ? fw : clamp(it.box.w, minW, COLS);
+    it.x = forced ? (j % per) * fw : clamp(it.box.x, 0, COLS - it.w);
+  });
+  const placed = [];
+  for (const it of its){
+    it.y = 0;
+    for (let hit; (hit = placed.find(p => overlap(p, it))); ) it.y = hit.y + hit.h;
+    placed.push(it);
+  }
+  return its;
+}
+function layoutAll(){
+  for (let pass = 0; pass < 4; pass++){            // repeat while a width change alters some block's height
+    let changed = false;
+    for (const key of ['cols', 'main']){
+      const g = GRIDS[key], its = g.items();
+      const step = (g.el.clientWidth + g.gap) / COLS;
+      const minW = clamp(Math.ceil((g.minPx + g.gap) / step), 1, COLS);
+      its.forEach(it => {
+        const cs = getComputedStyle(it.el);
+        const natural = it.el.querySelector(':scope > .gi-in').offsetHeight + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+        it.need = Math.ceil((natural + g.gap) / ROW);
+      });
+      pack(its, minW, drag && drag.key === key ? drag.box : null).forEach(it => {
+        const pos = `${it.x + 1} / span ${it.w}|${it.y + 1} / span ${it.h}`;
+        if (it.el.dataset.pos !== pos){
+          it.el.dataset.pos = pos;
+          [it.el.style.gridColumn, it.el.style.gridRow] = pos.split('|');
+          changed = true;
+        }
+        if (!drag) it.box.y = it.y;               // keep the stored order tidy
+      });
+    }
+    if (!changed) break;
+  }
+  boardEl.classList.add('ready');
+  if (drag) followDrag();
+}
+let layoutFrame = 0;
+function relayout(){ cancelAnimationFrame(layoutFrame); layoutFrame = requestAnimationFrame(layoutAll); }
+
+let drag = null;        // {key, el, box, mode: 'move'|'size', off, px, py, ph}
+function followDrag(){
+  const {el, ph} = drag;
+  [ph.style.gridColumn, ph.style.gridRow] = [el.style.gridColumn, el.style.gridRow];
+  if (drag.mode !== 'move') return;
+  el.style.transform = '';
+  const r = el.getBoundingClientRect();
+  el.style.transform = `translate(${drag.px - drag.off.x - r.left}px, ${drag.py - drag.off.y - r.top}px)`;
+}
+document.addEventListener('pointerdown', e => {
+  const h = e.target.closest('.grip, .sizer');
+  if (!h || e.button !== 0) return;
+  const el = h.closest('.friend, [data-panel]'), key = el.classList.contains('friend') ? 'cols' : 'main';
+  const box = key === 'cols' ? cardBox(+el.dataset.p) : layout.panels[el.dataset.panel];
+  const r = el.getBoundingClientRect();
+  const ph = document.createElement('div'); ph.className = 'gph';
+  GRIDS[key].el.appendChild(ph);
+  drag = {key, el, box, mode: h.classList.contains('grip') ? 'move' : 'size', off: {x: e.clientX - r.left, y: e.clientY - r.top}, px: e.clientX, py: e.clientY, ph};
+  el.classList.add('dragging'); document.body.classList.add('is-dragging');
+  h.setPointerCapture(e.pointerId);
+  e.preventDefault();
+  getSelection().removeAllRanges();
+  layoutAll();
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const g = GRIDS[drag.key], gr = g.el.getBoundingClientRect(), step = (g.el.clientWidth + g.gap) / COLS;
+  drag.px = e.clientX; drag.py = e.clientY;
+  if (drag.mode === 'move'){
+    drag.box.x = clamp(Math.round((e.clientX - drag.off.x - gr.left) / step), 0, COLS - 1);
+    drag.box.y = Math.round((e.clientY - drag.off.y - gr.top) / ROW);
+  } else {
+    const r = drag.el.getBoundingClientRect();
+    drag.box.w = clamp(Math.round((e.clientX - r.left + g.gap) / step), 1, COLS);
+    drag.box.h = Math.max(1, Math.round((e.clientY - r.top + g.gap) / ROW));
+  }
+  layoutAll();
+});
+function endDrag(){
+  if (!drag) return;
+  drag.el.style.transform = '';
+  drag.el.classList.remove('dragging'); document.body.classList.remove('is-dragging');
+  drag.ph.remove();
+  drag = null;
+  layoutAll(); saveLayout();
+}
+document.addEventListener('pointerup', endDrag);
+document.addEventListener('selectstart', e => { if (drag) e.preventDefault(); });
+document.addEventListener('pointercancel', endDrag);
+$('layout-reset').addEventListener('click', () => {
+  layout = {panels: defPanels(), cards: people.map((_, i) => defCard(i))};
+  saveLayout(); layoutAll();
+});
+boardEl.querySelectorAll('[data-panel]').forEach(p => p.insertAdjacentHTML('beforeend',
+  `<button class="px M btn grip" type="button" title="Drag to move" aria-label="Move this block">${ICON_GRIP}</button><span class="sizer" title="Drag to resize">${ICON_SIZE}</span>`));
+window.addEventListener('resize', relayout);
+if (document.fonts) document.fonts.ready.then(relayout);
+
+(async () => {
+  if (!await loadFromHash()) people = Array.from({length:3}, newFriend);
+  build();
+})();   // open a shared link first, then draw
