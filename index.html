@@ -17,12 +17,27 @@
     <button id="link" class="px L btn orange" type="button">Copy link</button>
     <button id="export" class="px L btn blue" type="button" disabled>Export picture</button>
     <button id="export-pdf" class="px L btn blue" type="button" disabled>Export PDF</button>
-    <button id="layout-reset" class="px L btn" type="button" style="--fill:var(--cream)">Reset layout</button>
-    <label class="px M toggle"><input id="preview" type="checkbox" checked> Preview first</label>
+    <button id="export-settings" class="px L btn" type="button" style="--fill:var(--cream)">Export settings</button>
+    <div class="px L btn pick"><select id="layout-preset" aria-label="Layout presets">
+      <option value="">Layout&hellip;</option>
+      <optgroup label="Panels">
+        <option value="default">Default (stacked)</option>
+        <option value="side">Side by side</option>
+        <option value="sideLeft">Side by side, results left</option>
+        <option value="resFirst">Results on top</option>
+      </optgroup>
+      <optgroup label="Friend cards">
+        <option value="cards1">1 per row</option>
+        <option value="cards2">2 per row</option>
+        <option value="cards3">3 per row</option>
+        <option value="cards4">4 per row</option>
+      </optgroup>
+    </select></div>
   </div>
 </header>
 
-<main id="board">
+<main>
+<div id="board" class="board">
   <section class="px L panel" data-panel="friends" style="--fill:var(--sage)">
     <div class="gi-in">
       <div class="px L pill">1. What did each friend pay?</div>
@@ -43,6 +58,7 @@
       <ul id="settle"><li class="px M">Type the amounts above.</li></ul>
     </div>
   </section>
+</div>
 </main>
 
 <dialog id="pv" class="px L preview" aria-labelledby="pv-title">
@@ -66,6 +82,37 @@
   <div class="pv-actions">
     <button id="pv-close" class="px M btn" type="button" style="--fill:var(--cream)">Cancel</button>
     <button id="pv-go" class="px M btn blue" type="button">Copy</button>
+  </div>
+</dialog>
+
+<dialog id="xs" class="px L preview xs" aria-labelledby="xs-title">
+  <div class="px L pill" id="xs-title">Export settings</div>
+  <p class="hint">These apply to Export picture and Export PDF.</p>
+  <div>
+    <label>Sections (tick to include, arrows to reorder)</label>
+    <ul id="xs-sections" class="xs-list"></ul>
+  </div>
+  <label class="px M toggle"><input id="xs-lines" type="checkbox"> Show each expense line</label>
+  <div>
+    <label>Width</label>
+    <div class="seg">
+      <label class="px M btn"><input type="radio" name="xs-width" value="narrow"> Narrow</label>
+      <label class="px M btn"><input type="radio" name="xs-width" value="normal"> Normal</label>
+      <label class="px M btn"><input type="radio" name="xs-width" value="wide"> Wide</label>
+    </div>
+  </div>
+  <div>
+    <label>Friends per row</label>
+    <div class="seg">
+      <label class="px M btn"><input type="radio" name="xs-cols" value="1"> 1</label>
+      <label class="px M btn"><input type="radio" name="xs-cols" value="2"> 2</label>
+      <label class="px M btn"><input type="radio" name="xs-cols" value="3"> 3</label>
+      <label class="px M btn"><input type="radio" name="xs-cols" value="4"> 4</label>
+    </div>
+  </div>
+  <div class="pv-actions">
+    <button id="xs-reset" class="px M btn" type="button" style="--fill:var(--cream)">Reset</button>
+    <button id="xs-done" class="px M btn blue" type="button">Done</button>
   </div>
 </dialog>
 

@@ -65,8 +65,8 @@ function build(focus){
        <div><label>Paid (₹) &amp; reason</label>
          <div class="exps">${p.exps.map((e,j) =>
            `<div class="exp" data-e="${j}">
-              <div class="px M field"><input class="am" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(e.amt)}"></div>
-              <div class="px M field"><input class="wy" placeholder="Reason (optional)" value="${esc(e.why)}"></div>
+              <div class="px M field f-am"><input class="am" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(e.amt)}"></div>
+              <div class="px M field f-wy"><input class="wy" placeholder="Reason (optional)" value="${esc(e.why)}"></div>
               <button class="px M btn ex${e.open ? ' open' : ''}${skipped(e, n).length ? ' on' : ''}" type="button"
                 title="${skipped(e, n).length ? 'Not split with: ' + esc(skipped(e, n).map(nameOf).join(', ')) : 'Choose who shares this expense'}"
                 aria-label="Choose who shares this expense" aria-expanded="${!!e.open}">${ICON_OPEN}</button>
@@ -237,10 +237,7 @@ async function copyText(text){
 async function copyLink(){
   const code = await encodeState();
   try { history.replaceState(null, '', hereUrl() + '#d=' + code); } catch(e){}
-  if (previewOn()) return showPreview('link', code);
-  const b = baseUrl();
-  if (!b) return toast('The custom base URL is not a valid address. Turn on "Preview first" to fix it.', 5000);
-  await doCopyLink(b + '#d=' + code);
+  showPreview('link', code);
 }
 async function doCopyLink(url){
   if (await copyText(url)){
@@ -254,13 +251,6 @@ async function doCopyLink(url){
 }
 
 /* ---------- preview before copying / downloading ---------- */
-const PREVIEW_KEY = 'sdm-preview';
-const previewOn = () => $('preview').checked;
-try { $('preview').checked = localStorage.getItem(PREVIEW_KEY) !== '0'; } catch(e){}
-$('preview').addEventListener('change', () => {
-  try { localStorage.setItem(PREVIEW_KEY, previewOn() ? '1' : '0'); } catch(e){}
-});
-
 let pv = null;          // what the open preview will copy / download: {kind, code, url} or {kind, url, blob, file, name}
 function showPreview(kind, data){
   closePreview();
@@ -436,8 +426,7 @@ async function exportPicture(kind){
   const blob = await canvasBlob(c, 'image/png');
   const file = kind === 'pdf' ? await canvasPdf(c) : blob;
   const name = 'split-da-money.' + kind;
-  if (previewOn()) showPreview(kind, {blob, file, name});
-  else downloadBlob(file, name);
+  showPreview(kind, {blob, file, name});
 }
 function downloadBlob(blob, name){
   const a = document.createElement('a');
@@ -447,6 +436,64 @@ function downloadBlob(blob, name){
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
+/* ---------- export settings: which sections, their order, width and cards per row (saved in this browser) ---------- */
+const EXPORT_KEY = 'sdm-export';
+const SECTIONS = {summary: 'Summary (total & share)', paid: 'Who paid what', settle: 'Settlement'};
+const WIDTHS = {narrow: 600, normal: 900, wide: 1200};
+const defExport = () => ({order: ['summary', 'paid', 'settle'], on: {summary: true, paid: true, settle: true}, lines: true, width: 'normal', cols: 1});
+let xo = defExport();
+try {
+  const s = JSON.parse(localStorage.getItem(EXPORT_KEY));
+  if (s){
+    const d = defExport();
+    if (Array.isArray(s.order) && s.order.length === 3 && d.order.every(k => s.order.includes(k))) d.order = s.order;
+    if (s.on) for (const k in d.on) if (typeof s.on[k] === 'boolean') d.on[k] = s.on[k];
+    if (typeof s.lines === 'boolean') d.lines = s.lines;
+    if (WIDTHS[s.width]) d.width = s.width;
+    if ([1,2,3,4].includes(s.cols)) d.cols = s.cols;
+    xo = d;
+  }
+} catch(e){}
+const saveExport = () => { try { localStorage.setItem(EXPORT_KEY, JSON.stringify(xo)); } catch(e){} };
+
+function drawExportSettings(){
+  $('xs-sections').innerHTML = xo.order.map((k, i) =>
+    `<li class="px M xs-row" data-k="${k}">
+       <label class="xs-check"><input type="checkbox" ${xo.on[k] ? 'checked' : ''}> ${SECTIONS[k]}</label>
+       <button class="px M btn xs-up" type="button" title="Move up" aria-label="Move ${SECTIONS[k]} up" ${i ? '' : 'disabled'}>${ICON_OPEN}</button>
+       <button class="px M btn xs-down" type="button" title="Move down" aria-label="Move ${SECTIONS[k]} down" ${i < xo.order.length - 1 ? '' : 'disabled'}>${ICON_OPEN}</button>
+     </li>`).join('');
+  $('xs-lines').checked = xo.lines;
+  $('xs-lines').disabled = !xo.on.paid;
+  document.querySelectorAll('#xs input[name="xs-width"]').forEach(r => r.checked = r.value === xo.width);
+  document.querySelectorAll('#xs input[name="xs-cols"]').forEach(r => { r.checked = +r.value === xo.cols; r.disabled = !xo.on.paid; });
+}
+$('export-settings').addEventListener('click', () => { drawExportSettings(); $('xs').showModal(); });
+$('xs-done').addEventListener('click', () => $('xs').close());
+$('xs').addEventListener('click', e => { if (e.target === $('xs')) $('xs').close(); });
+$('xs-reset').addEventListener('click', () => { xo = defExport(); saveExport(); drawExportSettings(); });
+$('xs-sections').addEventListener('click', e => {
+  const row = e.target.closest('.xs-row'), btn = e.target.closest('.xs-up, .xs-down');
+  if (!row || !btn) return;
+  const i = xo.order.indexOf(row.dataset.k), j = i + (btn.classList.contains('xs-up') ? -1 : 1);
+  [xo.order[i], xo.order[j]] = [xo.order[j], xo.order[i]];
+  saveExport(); drawExportSettings();
+  const r = $('xs-sections').querySelector(`[data-k="${row.dataset.k}"]`), dir = btn.classList.contains('xs-up') ? '.xs-up' : '.xs-down';
+  const again = r.querySelector(dir).disabled ? r.querySelector(dir === '.xs-up' ? '.xs-down' : '.xs-up') : r.querySelector(dir);
+  again.focus();
+});
+$('xs').addEventListener('change', e => {
+  const t = e.target;
+  if (t.closest('.xs-row')){
+    const k = t.closest('.xs-row').dataset.k;
+    if (!t.checked && xo.order.filter(q => xo.on[q]).length === 1){ t.checked = true; return toast('Keep at least one section in the export.'); }
+    xo.on[k] = t.checked;
+  } else if (t.id === 'xs-lines') xo.lines = t.checked;
+  else if (t.name === 'xs-width') xo.width = t.value;
+  else if (t.name === 'xs-cols') xo.cols = +t.value;
+  saveExport(); drawExportSettings();
+});
+
 async function renderPicture(){
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
   const {n, paid, total, share, uneven, bal, out} = last;
@@ -455,20 +502,31 @@ async function renderPicture(){
   // what each person paid (only lines with an amount)
   const blocks = people.slice(0, n).map((p, i) => ({
     i, name: nameOf(i), paid: paid[i], share: share[i], bal: bal[i],
-    rows: p.exps.filter(e => toPaise(e.amt) > 0).map(e => {
+    rows: !xo.lines ? [] : p.exps.filter(e => toPaise(e.amt) > 0).map(e => {
       const out = skipped(e, n).length && sharers(e, n).length < n ? skipped(e, n) : [];
-      return {why: ((e.why || '').trim() || '—') + (out.length ? ' {not for ' + out.map(nameOf).join(', ') + '}' : ''), amt: toPaise(e.amt)};
+      return {why: (e.why || '').trim() || '—', note: out.length ? '{not for ' + out.map(nameOf).join(', ') + '}' : '', amt: toPaise(e.amt)};
     })
   }));
 
-  const W = 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
+  const W = WIDTHS[xo.width], pad = 28, S = 2, inner = W - 2*pad, gap = 28;
   const pillH = 38, panelTop = 22, panelBottom = 24;
   const rowH = 52, cardGap = 16;
-  const blockH = b => 12 + 38 + (b.rows.length ? b.rows.length*32 + 6 : 0) + 14;
-  const expH = panelTop + pillH + 18 + blocks.reduce((s,b) => s + blockH(b), 0) + cardGap*(blocks.length-1) + panelBottom;
+  const bx = pad + 26, bw = inner - 52;
+  const cols = Math.max(1, Math.min(xo.cols, blocks.length));
+  const colW = (bw - cardGap*(cols-1)) / cols;
+  const compact = colW < 600;                       // narrow cards: name + chip on one line, amounts below
+  const headH = compact ? 12 + 34 + 40 + 24 + (uneven ? 22 : 0) : 12 + 38;
+  const lineOf = r => r.note ? 52 : 32;
+  const blockH = b => headH + (b.rows.length ? b.rows.reduce((s, r) => s + lineOf(r), 0) + 6 : 0) + 14;
+  const grid = [];
+  for (let k = 0; k < blocks.length; k += cols) grid.push(blocks.slice(k, k + cols));
+  const lineH = grid.map(r => Math.max(...r.map(blockH)));
+  const expH = panelTop + pillH + 18 + lineH.reduce((s,h) => s + h, 0) + cardGap*(grid.length-1) + panelBottom;
   const payRows = Math.max(1, out.length);
   const payH = panelTop + pillH + 18 + payRows*rowH - 8 + panelBottom;
-  const H = 88 + gap + 88 + gap + expH + gap + payH + gap + 52;
+  const heights = {summary: 88, paid: expH, settle: payH};
+  const shown = xo.order.filter(k => xo.on[k]);
+  const H = 88 + gap + shown.reduce((s,k) => s + heights[k] + gap, 0) + 52;
 
   const c = document.createElement('canvas');
   c.width = W*S; c.height = H*S;
@@ -481,10 +539,9 @@ async function renderPicture(){
   // header
   ctx.fillStyle = '#f2bf5e'; ctx.fillRect(0, 0, W, 88);
   ctx.fillStyle = INK; ctx.fillRect(0, 84, W, 4);
-  txt(ctx, '★ SPLIT-DA-MONEY', pad, 44, 30);
+  txt(ctx, '★ SPLIT-DA-MONEY', pad, 44, W < 700 ? 24 : 30);
   txt(ctx, new Date().toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}), W-pad, 44, 15, 'right');
 
-  let y = 88 + gap;
   const pill = (label, py, color) => {
     ctx.font = '700 15px "Space Mono","Courier New",monospace';
     const w = ctx.measureText(label).width + 36;
@@ -492,64 +549,81 @@ async function renderPicture(){
     txt(ctx, label, pad+26+18, py+pillH/2+1, 15);
   };
 
-  // summary
-  box(ctx, pad, y, inner, 88, '#f5c542', 'L');
-  txt(ctx, 'TOTAL SPENT', pad+30, y+32, 13);
-  txt(ctx, fmt(total), pad+30, y+60, 26);
-  if (uneven){
-    txt(ctx, 'FAIR SHARES', W/2+10, y+32, 13);
-    txt(ctx, 'Differ, see below', W/2+10, y+60, 18);
-  } else {
-    txt(ctx, 'EACH FRIEND SHOULD PAY', W/2+10, y+32, 13);
-    txt(ctx, fmt(Math.round(total / n)), W/2+10, y+60, 26);
-  }
-  y += 88 + gap;
-
-  // expenses: what was paid by whom and why
-  box(ctx, pad, y, inner, expH, '#c9e0a6', 'L');
-  pill('WHO PAID WHAT', y + panelTop, '#3cc4cf');
-  let by = y + panelTop + pillH + 18;
-  const bx = pad + 26, bw = inner - 52;
-  blocks.forEach(b => {
-    const h = blockH(b);
-    box(ctx, bx, by, bw, h, COLORS[b.i % 4], 'M');
-    const hy = by + 12 + 19;
-    txt(ctx, b.name, bx+20, hy, 17, 'left', bw*0.32);
-    if (uneven) txt(ctx, 'PAID ' + fmt(b.paid) + ' · SHARE ' + fmt(b.share), bx+bw*0.34, hy, 13, 'left', bw*0.66 - 230);
-    else txt(ctx, 'PAID ' + fmt(b.paid), bx+bw*0.40, hy, 14);
+  const draw = {
+    summary(y){
+      box(ctx, pad, y, inner, 88, '#f5c542', 'L');
+      const big = W < 700 ? 22 : 26;
+      txt(ctx, 'TOTAL SPENT', pad+30, y+32, 13);
+      txt(ctx, fmt(total), pad+30, y+60, big, 'left', inner/2 - 40);
+      if (uneven){
+        txt(ctx, 'FAIR SHARES', W/2+10, y+32, 13);
+        txt(ctx, 'Differ per friend', W/2+10, y+60, W < 700 ? 15 : 18, 'left', inner/2 - 40);
+      } else {
+        txt(ctx, 'EACH FRIEND SHOULD PAY', W/2+10, y+32, 13, 'left', inner/2 - 40);
+        txt(ctx, fmt(Math.round(total / n)), W/2+10, y+60, big, 'left', inner/2 - 40);
+      }
+    },
+    paid(y){
+      box(ctx, pad, y, inner, expH, '#c9e0a6', 'L');
+      pill('WHO PAID WHAT', y + panelTop, '#3cc4cf');
+      let by = y + panelTop + pillH + 18;
+      grid.forEach((line, li) => {
+        line.forEach((b, ci) => drawBlock(b, bx + ci*(colW + cardGap), by, colW, lineH[li]));
+        by += lineH[li] + cardGap;
+      });
+    },
+    settle(y){
+      box(ctx, pad, y, inner, payH, '#f6c878', 'L');
+      pill('SETTLEMENT', y + panelTop, '#3cc4cf');
+      let ry = y + panelTop + pillH + 18;
+      if (!out.length){
+        box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
+        txt(ctx, 'Everyone paid the same. Nothing to settle!', bx+18, ry+(rowH-8)/2+1, 15, 'left', bw-36);
+      } else out.forEach(t => {
+        const aw = Math.min(170, bw*0.3), ax = bx + bw - aw - 8;
+        box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
+        txt(ctx, `${nameOf(t.from)}  gives  ${nameOf(t.to)}`, bx+18, ry+(rowH-8)/2+1, 16, 'left', bw - aw - 40);
+        box(ctx, ax, ry+5, aw, rowH-18, '#f5c542', 'M');
+        txt(ctx, fmt(t.v), ax+aw/2, ry+(rowH-8)/2+1, 15, 'center', aw-12);
+        ry += rowH;
+      });
+    }
+  };
+  function drawBlock(b, x, y, w, h){
+    box(ctx, x, y, w, h, COLORS[b.i % 4], 'M');
+    const hy = y + 12 + 19;
     const lab = b.bal > 0 ? 'GETS ' + fmt(b.bal) : b.bal < 0 ? 'PAYS ' + fmt(-b.bal) : 'ALL GOOD';
     const col = b.bal > 0 ? '#8fdc7a' : b.bal < 0 ? '#e2503a' : '#fff7e0';
-    const cw = 200, cx = bx + bw - cw - 14;
-    box(ctx, cx, by+12+3, cw, 32, col, 'M');
-    txt(ctx, lab, cx+cw/2, hy+1, 13, 'center', cw-16, b.bal < 0 ? '#ffffff' : INK);
-    let ry = by + 12 + 38 + 2;
+    ctx.font = '700 13px "Space Mono","Courier New",monospace';
+    const cw = compact ? Math.min(ctx.measureText(lab).width + 32, w - 40) : 200, cx = compact ? x + 20 : x + w - cw - 14;
+    const money = uneven ? 'PAID ' + fmt(b.paid) + ' · SHARE ' + fmt(b.share) : 'PAID ' + fmt(b.paid);
+    let cy = hy;                                     // middle of the GETS / PAYS chip
+    if (compact){                                    // narrow card: name, chip, then the amounts, one per line
+      cy = y + 12 + 34 + 17;
+      txt(ctx, b.name, x+20, y + 12 + 17, 17, 'left', w - 40);
+      txt(ctx, 'PAID ' + fmt(b.paid), x+20, cy + 34, 13, 'left', w - 40);
+      if (uneven) txt(ctx, 'SHARE ' + fmt(b.share), x+20, cy + 56, 13, 'left', w - 40);
+    } else {
+      txt(ctx, b.name, x+20, hy, 17, 'left', w*0.30);
+      txt(ctx, money, x+w*0.34, hy, 13, 'left', w*0.66 - cw - 40);
+    }
+    box(ctx, cx, cy - 16, cw, 32, col, 'M');
+    txt(ctx, lab, cx+cw/2, cy+1, 13, 'center', cw-16, b.bal < 0 ? '#ffffff' : INK);
+    let ry = y + headH + 2;
     b.rows.forEach(r => {
-      const cy = ry + 15;
-      ctx.fillStyle = INK; ctx.fillRect(bx+22, cy-3, 6, 6);
-      txt(ctx, r.why, bx+38, cy, 15, 'left', bw-38-170);
-      txt(ctx, fmt(r.amt), bx+bw-20, cy, 15, 'right');
-      ry += 32;
+      const cy = ry + 15, amt = fmt(r.amt);
+      ctx.font = '700 15px "Space Mono","Courier New",monospace';
+      const aw = ctx.measureText(amt).width;
+      ctx.fillStyle = INK; ctx.fillRect(x+22, cy-3, 6, 6);
+      txt(ctx, r.why, x+38, cy, 15, 'left', w - 38 - 20 - aw - 18);
+      txt(ctx, amt, x+w-20, cy, 15, 'right');
+      if (r.note) txt(ctx, r.note, x+38, cy + 21, 12, 'left', w - 38 - 20, '#6b5d4a');
+      ry += lineOf(r);
     });
-    by += h + cardGap;
-  });
-  y += expH + gap;
+  }
 
-  // settlement
-  box(ctx, pad, y, inner, payH, '#f6c878', 'L');
-  pill('SETTLEMENT', y + panelTop, '#3cc4cf');
-  let ry = y + panelTop + pillH + 18;
-  if (!out.length){
-    box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
-    txt(ctx, 'Everyone paid the same. Nothing to settle!', bx+18, ry+(rowH-8)/2+1, 15);
-  } else out.forEach(t => {
-    box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
-    txt(ctx, `${nameOf(t.from)}  gives  ${nameOf(t.to)}`, bx+18, ry+(rowH-8)/2+1, 16, 'left', bw-210);
-    const aw = 170, ax = bx + bw - aw - 8;
-    box(ctx, ax, ry+5, aw, rowH-18, '#f5c542', 'M');
-    txt(ctx, fmt(t.v), ax+aw/2, ry+(rowH-8)/2+1, 15, 'center', aw-12);
-    ry += rowH;
-  });
-  y += payH + gap;
+  let y = 88 + gap;
+  shown.forEach(k => { draw[k](y); y += heights[k] + gap; });
 
   // footer
   ctx.fillStyle = '#e8808f'; ctx.fillRect(0, H-52, W, 52);
@@ -589,15 +663,18 @@ async function canvasPdf(c){
 /* ---------- layout: snap-to-grid dashboard, saved in this browser ----------
    Panels and friend cards sit on a 12-column grid with 8px rows. Each block has a stored box {x, y, w, h}
    (h = 0 means "as tall as its content"); blocks fall upward to fill gaps and never overlap. */
-const COLS = 12, ROW = 8, LAYOUT_KEY = 'sdm-layout';
-const defPanels = () => ({friends:{x:0, y:0, w:12, h:0}, results:{x:0, y:1, w:12, h:0}});
-const defCard = (i, last) => ({x:(i % 3) * 4, y:last ? 1e6 : i, w:4, h:0});
+const COLS = 24, ROW = 4, LAYOUT_KEY = 'sdm-layout', LAYOUT_V = 2;
+const defPanels = () => ({friends:{x:0, y:0, w:24, h:0}, results:{x:0, y:1, w:24, h:0}});
+const defCard = (i, last, per = 3) => ({x:(i % per) * (COLS / per), y:last ? 1e6 : i, w:COLS / per, h:0});
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const goodBox = b => b && ['x','y','w','h'].every(k => Number.isFinite(b[k]));
 function loadLayout(){
-  const l = {panels: defPanels(), cards: []};
+  const l = {v: LAYOUT_V, panels: defPanels(), cards: []};
   try {
     const s = JSON.parse(localStorage.getItem(LAYOUT_KEY));
+    if (s && s.v !== LAYOUT_V){             // v1 used 12 columns and 8px rows: scale everything by 2
+      [...Object.values(s.panels || {}), ...(s.cards || [])].forEach(b => { if (goodBox(b)) for (const k of ['x','y','w','h']) b[k] *= 2; });
+    }
     if (s && s.panels) for (const k in l.panels) if (goodBox(s.panels[k])) l.panels[k] = s.panels[k];
     if (s && Array.isArray(s.cards)) l.cards = s.cards.map((b, i) => goodBox(b) ? b : defCard(i));
   } catch(e){}
@@ -608,7 +685,7 @@ let layout = loadLayout();
 const cardBox = i => layout.cards[i] || (layout.cards[i] = defCard(i));
 
 const GRIDS = {
-  cols: {el: colsEl, gap: 22, minPx: 280,
+  cols: {el: colsEl, gap: 22, minPx: 200,
          items: () => [...colsEl.querySelectorAll(':scope > .friend')].map(el => ({el, box: cardBox(+el.dataset.p)}))},
   main: {el: boardEl, gap: 28, minPx: 320,
          items: () => [...boardEl.querySelectorAll(':scope > [data-panel]')].map(el => ({el, box: layout.panels[el.dataset.panel]}))}
@@ -637,7 +714,7 @@ function layoutAll(){
     let changed = false;
     for (const key of ['cols', 'main']){
       const g = GRIDS[key], its = g.items();
-      const step = (g.el.clientWidth + g.gap) / COLS;
+      const step = g.el.clientWidth / COLS;
       const minW = clamp(Math.ceil((g.minPx + g.gap) / step), 1, COLS);
       its.forEach(it => {
         const cs = getComputedStyle(it.el);
@@ -688,7 +765,7 @@ document.addEventListener('pointerdown', e => {
 });
 document.addEventListener('pointermove', e => {
   if (!drag) return;
-  const g = GRIDS[drag.key], gr = g.el.getBoundingClientRect(), step = (g.el.clientWidth + g.gap) / COLS;
+  const g = GRIDS[drag.key], gr = g.el.getBoundingClientRect(), step = g.el.clientWidth / COLS;
   drag.px = e.clientX; drag.py = e.clientY;
   if (drag.mode === 'move'){
     drag.box.x = clamp(Math.round((e.clientX - drag.off.x - gr.left) / step), 0, COLS - 1);
@@ -711,8 +788,21 @@ function endDrag(){
 document.addEventListener('pointerup', endDrag);
 document.addEventListener('selectstart', e => { if (drag) e.preventDefault(); });
 document.addEventListener('pointercancel', endDrag);
-$('layout-reset').addEventListener('click', () => {
-  layout = {panels: defPanels(), cards: people.map((_, i) => defCard(i))};
+const PRESETS = {
+  default:   () => ({panels: defPanels(), cards: people.map((_, i) => defCard(i))}),
+  side:      () => ({panels: {friends:{x:0, y:0, w:15, h:0}, results:{x:15, y:0, w:9, h:0}}}),
+  sideLeft:  () => ({panels: {results:{x:0, y:0, w:9, h:0}, friends:{x:9, y:0, w:15, h:0}}}),
+  resFirst:  () => ({panels: {results:{x:0, y:0, w:24, h:0}, friends:{x:0, y:1, w:24, h:0}}}),
+  cards1:    () => ({cards: people.map((_, i) => defCard(i, false, 1))}),
+  cards2:    () => ({cards: people.map((_, i) => defCard(i, false, 2))}),
+  cards3:    () => ({cards: people.map((_, i) => defCard(i, false, 3))}),
+  cards4:    () => ({cards: people.map((_, i) => defCard(i, false, 4))})
+};
+$('layout-preset').addEventListener('change', e => {
+  const p = PRESETS[e.target.value];
+  e.target.value = '';
+  if (!p) return;
+  Object.assign(layout, p(), {v: LAYOUT_V});
   saveLayout(); layoutAll();
 });
 boardEl.querySelectorAll('[data-panel]').forEach(p => p.insertAdjacentHTML('beforeend',

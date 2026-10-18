@@ -22,7 +22,7 @@ header.bar{background:var(--bar);border-bottom:4px solid var(--ink);padding:16px
            display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:22px;text-transform:uppercase;letter-spacing:1px}
 h1 span{background:var(--cream);padding:0 6px}
-main{max-width:1200px;margin:0 auto;padding:30px 16px 20px;filter:drop-shadow(6px 6px 0 rgba(43,33,24,.32))}
+main{max-width:1200px;margin:0 auto;padding:30px 16px 20px;overflow-x:clip;filter:drop-shadow(6px 6px 0 rgba(43,33,24,.32))}
 .panel{padding:calc(var(--b) + 18px)}
 .pill{display:inline-block;--fill:var(--cyan);padding:calc(var(--b) + 3px) 16px;margin-bottom:16px;font-size:14px;text-transform:uppercase}
 label{display:block;font-size:12px;text-transform:uppercase;margin-bottom:4px}
@@ -44,6 +44,8 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .btn.orange{--fill:var(--orange)}
 
 .tools{display:flex;gap:14px;flex-wrap:wrap}
+.pick{padding:0;--fill:var(--cream)}
+.pick select{padding:calc(var(--b) + 8px) 14px;font-size:13px;text-transform:uppercase}
 .toggle{display:flex;align-items:center;gap:8px;margin:0;padding:calc(var(--b) + 8px) 14px;--fill:var(--cream);
         font-size:13px;cursor:pointer;user-select:none}
 .toggle input{width:16px;height:16px;margin:0;accent-color:var(--ink);cursor:pointer}
@@ -65,6 +67,21 @@ a.btn[hidden]{display:none}
 select{width:100%;font:700 13px var(--font);color:var(--ink);background:transparent;border:0;padding:0;outline:none;cursor:pointer}
 .pic{--fill:#fffaf0;padding:calc(var(--b) + 8px)}
 .pic img{display:block;width:100%;height:auto;max-height:60vh;object-fit:contain}
+.xs{width:min(520px,calc(100vw - 32px))}
+.xs .hint{margin:0}
+.xs-list{gap:8px}
+.xs-row{display:flex;align-items:center;gap:8px;padding:calc(var(--b) + 6px) 10px}
+.xs-check{flex:1;display:flex;align-items:center;gap:8px;margin:0;font-size:13px;text-transform:none;cursor:pointer}
+.xs-check input,.toggle input{width:16px;height:16px;margin:0;accent-color:var(--ink);cursor:pointer}
+.xs-up,.xs-down{width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;--fill:var(--cream)}
+.xs-up svg{transform:rotate(90deg)} .xs-down svg{transform:rotate(-90deg)}
+.xs .toggle{align-self:flex-start}
+.seg{display:flex;gap:8px;flex-wrap:wrap}
+.seg .btn{--fill:var(--cream);margin:0;padding:calc(var(--b) + 6px) 14px;font-size:12px}
+.seg .btn:has(input:checked){--fill:var(--yellow)}
+.seg .btn:has(input:disabled){--fill:#d8d0b8;color:#8b836e;cursor:not-allowed}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg .btn:has(input:focus-visible){outline:2px solid var(--ink);outline-offset:2px}
 .pv-actions{display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}
 
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);--fill:var(--yellow);
@@ -75,12 +92,13 @@ select{width:100%;font:700 13px var(--font);color:var(--ink);background:transpar
 .setup{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
 
 /* ---------- snap-to-grid layout ---------- */
-main,.cols{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:8px}
-main{column-gap:28px}
-main:not(.ready){visibility:hidden}
-main > [data-panel],main > .gph{grid-column:1/-1;margin-bottom:28px}
-.cols{column-gap:22px;margin-bottom:-22px}
-.cols > .friend,.cols > .gph{margin-bottom:22px}
+/* the gap is a right/bottom margin on each block, and the grid is one gap wider, so 24 columns always fit */
+.board,.cols{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));grid-auto-rows:4px}
+.board{margin-right:-28px}
+.board:not(.ready){visibility:hidden}
+.board > [data-panel],.board > .gph{grid-column:1/-1;margin:0 28px 28px 0}
+.cols{margin:0 -22px -22px 0}
+.cols > .friend,.cols > .gph{margin:0 22px 22px 0}
 .gph{border:3px dashed rgba(43,33,24,.45)}
 .dragging{z-index:5;opacity:.92}
 .is-dragging,.is-dragging *{cursor:grabbing !important;user-select:none}
@@ -95,6 +113,15 @@ main > [data-panel],main > .gph{grid-column:1/-1;margin-bottom:28px}
 /* ---------- friends ---------- */
 .friend{padding:calc(var(--b) + 12px);--fill:#f8dc8f}
 .friend > .gi-in{display:flex;flex-direction:column;gap:12px}
+.friend{container:card/inline-size}
+@container card (max-width:300px){                       /* narrow card: reason gets its own line */
+  .friend .exp{grid-template-columns:minmax(0,1fr) 34px 34px}
+  .exp .f-am{grid-column:1;grid-row:1}
+  .exp .ex{grid-column:2;grid-row:1}
+  .exp .rm{grid-column:3;grid-row:1}
+  .exp .f-wy{grid-column:1/-1;grid-row:2}
+  .exp .tags{grid-row:3}
+}
 .card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
 .card-top label{margin:0}
 .gtools{display:flex;gap:6px}
@@ -135,3 +162,4 @@ li.t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .amt{margin-left:auto;background:var(--yellow);padding:1px 10px}
 
 @media (max-width:520px){h1{font-size:17px}}
+.panel > .gi-in > .pill{max-width:calc(100% - 44px)}
