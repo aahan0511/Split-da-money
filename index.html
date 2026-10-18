@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261018b">
+<link rel="stylesheet" href="style.css?v=20261018d">
 </head>
 <body>
 
@@ -19,7 +19,7 @@
   </nav>
   <div class="tools">
     <button id="link" class="px L btn orange" type="button">Copy link</button>
-    <div class="menu-wrap">
+    <div class="menu-wrap" id="export-wrap">
       <button id="export-menu" class="px L btn blue" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-list">Export <span class="caret"></span></button>
       <div id="export-list" class="px L menu" role="menu" hidden>
         <div class="menu-h">Split</div>
@@ -34,21 +34,22 @@
         <button type="button" role="menuitem" data-x="settings">Export settings&hellip;</button>
       </div>
     </div>
-    <div class="px L btn pick split-only"><select id="layout-preset" aria-label="Layout presets">
-      <option value="">Layout&hellip;</option>
-      <optgroup label="Panels">
-        <option value="default">Default (stacked)</option>
-        <option value="side">Side by side</option>
-        <option value="sideLeft">Side by side, results left</option>
-        <option value="resFirst">Results on top</option>
-      </optgroup>
-      <optgroup label="Friend cards">
-        <option value="cards1">1 per row</option>
-        <option value="cards2">2 per row</option>
-        <option value="cards3">3 per row</option>
-        <option value="cards4">4 per row</option>
-      </optgroup>
-    </select></div>
+    <div class="menu-wrap split-only" id="layout-wrap">
+      <button id="layout-menu" class="px L btn" type="button" style="--fill:var(--cream)" aria-haspopup="menu" aria-expanded="false" aria-controls="layout-list">Layout <span class="caret"></span></button>
+      <div id="layout-list" class="px L menu" role="menu" hidden>
+        <div class="menu-h">Sections</div>
+        <button type="button" role="menuitemradio" data-l="side:false">Stacked</button>
+        <button type="button" role="menuitemradio" data-l="side:true">Side by side</button>
+        <div class="menu-h">Friend cards per row</div>
+        <button type="button" role="menuitemradio" data-l="per:0">As many as fit</button>
+        <button type="button" role="menuitemradio" data-l="per:1">1</button>
+        <button type="button" role="menuitemradio" data-l="per:2">2</button>
+        <button type="button" role="menuitemradio" data-l="per:3">3</button>
+        <button type="button" role="menuitemradio" data-l="per:4">4</button>
+        <div class="menu-h"></div>
+        <button type="button" role="menuitem" data-l="reset">Reset layout</button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -56,9 +57,9 @@
 <div id="board" class="board">
   <section class="px L panel" data-panel="friends" style="--fill:var(--sage)">
     <div class="gi-in">
-      <div class="px L pill">1. What did each friend pay?</div>
+      <div class="px L pill" data-title="What did each friend pay?">1. What did each friend pay?</div>
       <p class="hint">Add one line per expense. The reason is optional (₹). Press &lsaquo; to leave friends out of an expense.
-        Drag the dotted handle to move a block and its bottom-right corner to resize it.</p>
+        Drag the dotted handle to reorder friends and sections.</p>
       <div class="setup">
         <button id="add-friend" class="px M btn" type="button">+ Add friend</button>
         <button id="reset" class="px M btn" type="button" style="--fill:var(--cream)">Clear amounts</button>
@@ -69,7 +70,7 @@
 
   <section class="px L panel" data-panel="results" style="--fill:var(--peach)">
     <div class="gi-in">
-      <div class="px L pill">2. Who pays whom</div>
+      <div class="px L pill" data-title="Who pays whom">2. Who pays whom</div>
       <div class="px M summary" id="summary" hidden></div>
       <ul id="settle"><li class="px M">Type the amounts above.</li></ul>
     </div>
@@ -80,11 +81,11 @@
 <main id="page-ledger" hidden>
   <section class="px L panel" style="--fill:var(--sage)">
     <div class="px L pill">Ledger</div>
-    <p class="hint">Every expense and every payment between friends, with its date and time. Changes here also change the Split page.
+    <p class="hint">Every expense and every payment between friends. Date and time are optional. Changes here also change the Split page.
       <b>Expense</b> is split between the friends you pick, <b>Paid for</b> is paid for one friend only, and <b>Paid back</b> is money one friend gives another.</p>
     <div class="px M table-wrap">
       <table class="ledger">
-        <thead><tr><th>Date &amp; time</th><th>Type</th><th>Paid by</th><th class="num">Amount (₹)</th><th>For / to</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead>
+        <thead><tr><th>Date</th><th>Time</th><th>Type</th><th>Paid by</th><th class="num">Amount (₹)</th><th>For / to</th><th>Note</th><th><span class="sr">Actions</span></th></tr></thead>
         <tbody id="lg-new"></tbody>
         <tbody id="lg-body"></tbody>
       </table>
@@ -151,6 +152,6 @@
 
 <div id="toast" class="px M toast" role="status" hidden></div>
 
-<script src="script.js?v=20261018b"></script>
+<script src="script.js?v=20261018d"></script>
 </body>
 </html>

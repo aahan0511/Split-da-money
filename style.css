@@ -44,8 +44,6 @@ input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-
 .btn.orange{--fill:var(--orange)}
 
 .tools{display:flex;gap:14px;flex-wrap:wrap}
-.pick{padding:0;--fill:var(--cream)}
-.pick select{padding:calc(var(--b) + 8px) 14px;font-size:13px;text-transform:uppercase}
 .toggle{display:flex;align-items:center;gap:8px;margin:0;padding:calc(var(--b) + 8px) 14px;--fill:var(--cream);
         font-size:13px;cursor:pointer;user-select:none}
 .toggle input{width:16px;height:16px;margin:0;accent-color:var(--ink);cursor:pointer}
@@ -92,24 +90,19 @@ select{width:100%;font:700 13px var(--font);color:var(--ink);background:transpar
 .setup{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
 
 /* ---------- snap-to-grid layout ---------- */
-/* the gap is a right/bottom margin on each block, and the grid is one gap wider, so 24 columns always fit */
-.board,.cols{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));grid-auto-rows:4px}
-.board{margin-right:-28px}
-.board:not(.ready){visibility:hidden}
-.board > [data-panel],.board > .gph{grid-column:1/-1;margin:0 28px 28px 0}
-.cols{margin:0 -22px -22px 0}
-.cols > .friend,.cols > .gph{margin:0 22px 22px 0}
-.gph{border:3px dashed rgba(43,33,24,.45)}
-.dragging{z-index:5;opacity:.92}
+.board{display:grid;gap:28px;align-items:start}
+.board.side{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+.board.side.res-first{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
+@media (max-width:860px){.board.side,.board.side.res-first{grid-template-columns:minmax(0,1fr)}}
+/* friend cards: as many as fit, or at most --per per row (fewer when the screen is narrow) */
+.cols{display:grid;gap:22px;align-items:start;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.cols.per{grid-template-columns:repeat(auto-fill,minmax(max(220px,calc((100% - (var(--per) - 1) * 22px) / var(--per))),1fr))}
+.dragging{opacity:.55;outline:3px dashed var(--ink);outline-offset:4px}
 .is-dragging,.is-dragging *{cursor:grabbing !important;user-select:none}
 .grip{width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center;--fill:var(--cream);cursor:grab;touch-action:none}
 .panel > .grip{position:absolute;top:calc(var(--b) + 14px);right:calc(var(--b) + 14px)}
-.sizer{position:absolute;right:calc(var(--b) + 5px);bottom:calc(var(--b) + 5px);width:14px;height:14px;display:flex;
-       align-items:flex-end;justify-content:flex-end;cursor:nwse-resize;touch-action:none;opacity:.6}
-.sizer:hover{opacity:1}
-.grip,.sizer{user-select:none;-webkit-user-select:none}
-.sizer svg{display:block}
-
+.grip svg{display:block;flex:none}
+.grip{user-select:none;-webkit-user-select:none}
 /* ---------- friends ---------- */
 .friend{padding:calc(var(--b) + 12px);--fill:#f8dc8f}
 .friend > .gi-in{display:flex;flex-direction:column;gap:12px}
@@ -171,7 +164,7 @@ li.t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tab{--fill:var(--cream);font-size:13px}
 .tab[aria-selected="true"]{--fill:var(--ink);color:var(--cream)}
 .tab[aria-selected="true"]::before{filter:none}
-[hidden].split-only{display:none}
+.split-only[hidden]{display:block;visibility:hidden}   /* keeps its space so the top bar doesn't shift */
 .menu-wrap{position:relative}
 .caret{display:inline-block;width:0;height:0;margin-left:6px;vertical-align:middle;border:5px solid transparent;border-top:6px solid currentColor;border-bottom:0}
 .menu{position:absolute;right:0;top:calc(100% + 8px);z-index:30;min-width:240px;--fill:var(--cream);padding:calc(var(--b) + 8px) calc(var(--b) + 6px);
@@ -193,14 +186,15 @@ li.t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 /* ---------- ledger ---------- */
 #page-ledger .panel{padding:calc(var(--b) + 18px)}
 .table-wrap{--fill:#fffaf0;padding:var(--b);overflow-x:auto}
-table.ledger{width:100%;border-collapse:collapse;font-size:13px;min-width:980px}
+table.ledger{width:100%;border-collapse:collapse;font-size:13px;min-width:1060px}
 .ledger th{background:var(--cyan);text-align:left;font-size:12px;text-transform:uppercase;padding:10px 8px;border-bottom:2px solid var(--ink);white-space:nowrap}
 .ledger th.num,.ledger td.num{text-align:right}
 .ledger td{padding:6px 8px;vertical-align:middle;border-bottom:2px dashed rgba(43,33,24,.18)}
 .ledger tbody#lg-body tr:nth-child(even) td{background:#f7ebc6}
 .ledger tr.lg-new td{background:#fff2a6;border-bottom:2px solid var(--ink)}
 .ledger .field{padding:calc(var(--b) + 4px) calc(var(--b) + 6px)}
-.ledger .lg-at{min-width:180px}
+.ledger .lg-date{min-width:130px}
+.ledger .lg-time{min-width:90px}
 .ledger .lg-amt{width:90px;text-align:right}
 .ledger select{font-size:13px;text-transform:none}
 .ledger .tags{gap:4px;flex-wrap:wrap}
@@ -214,3 +208,5 @@ table.plain{width:100%;border-collapse:collapse;font-size:12px}
 .plain td{padding:5px 8px;border-bottom:1px dashed rgba(43,33,24,.25);font-weight:400}
 .plain td.num{text-align:right}
 @media (max-width:520px){.menu{position:fixed;left:16px;right:16px;top:auto;margin-top:8px;min-width:0}}
+.menu button[aria-checked="true"]::before{content:"\2713  "}
+.menu button[role="menuitemradio"]:not([aria-checked="true"]){padding-left:28px}

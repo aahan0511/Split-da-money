@@ -24,9 +24,10 @@
 const $ = id => document.getElementById(id);
 const colsEl = $('cols'), boardEl = $('board');
 let nextId = 1;
-const newExp = (o = {}) => ({id: nextId++, amt:'', why:'', skip:[], at:null, ...o});
-let people = [];        // [{name, exps:[{id, amt, why, skip:[friend indices left out], at: time in ms, open}]}]
-let transfers = [];     // paid back: [{id, from, to, amt, why, at}]
+const newExp = (o = {}) => ({id: nextId++, amt:'', why:'', skip:[], date:'', time:'', ...o});
+// date 'YYYY-MM-DD' and time 'HH:MM' are both optional ('' = not given)
+let people = [];        // [{name, exps:[{id, amt, why, skip:[friend indices left out], date, time, open}]}]
+let transfers = [];     // paid back: [{id, from, to, amt, why, date, time}]
 const isBlank = e => e.amt === '' && e.why === '';
 let last = null;        // latest result, used for the picture
 
@@ -44,7 +45,6 @@ const pixIcon = rows => {
 };
 const ICON_OPEN = pixIcon(['...##','..##.','.##..','##...','##...','.##..','..##.','...##']);
 const ICON_GRIP = pixIcon(['##.##','##.##','.....','##.##','##.##','.....','##.##','##.##']);
-const ICON_SIZE = pixIcon(['.....#','......','...#.#','......','.#.#.#','......']);
 const ICON_RM   = pixIcon(['##....##','.##..##.','..####..','...##...','...##...','..####..','.##..##.','##....##']);
 const tagText = i => Array.from((people[i].name || '').trim())[0]?.toUpperCase() || String(i+1);
 const skipped = (e, n) => e.skip.filter(q => q < n).sort((a,b) => a-b);
@@ -62,7 +62,7 @@ function build(focus){
     d.innerHTML =
       `<div class="gi-in">
        <div><div class="card-top"><label>Name</label><span class="gtools">
-         <button class="px M btn grip" type="button" title="Drag to move" aria-label="Move ${esc(nameOf(i))}">${ICON_GRIP}</button>
+         <button class="px M btn grip" type="button" title="Drag to move (or use the arrow keys)" aria-label="Move ${esc(nameOf(i))}">${ICON_GRIP}</button>
          ${n > MIN_FRIENDS ? `<button class="px M btn rmf" type="button" title="Remove this friend" aria-label="Remove ${esc(nameOf(i))}">${ICON_RM}</button>` : ''}
        </span></div><div class="px M field"><input class="nm" placeholder="Friend ${i+1}" value="${esc(p.name)}"></div></div>
        <div><label>Paid (₹) &amp; reason</label>
@@ -88,8 +88,7 @@ function build(focus){
        <button class="px M btn add" type="button">+ Add expense</button>
        <div class="sub" id="sub${i}"></div>
        <div class="px M chip" id="bal${i}"></div>
-       </div>
-       <span class="sizer" title="Drag to resize">${ICON_SIZE}</span>`;
+       </div>`;
     colsEl.appendChild(d);
   }
   $('add-friend').disabled = n >= MAX_FRIENDS;
@@ -162,7 +161,6 @@ function calc(){
   last = {n, paid, total, share, uneven, bal, out, sent, got, active};
   updateExportMenu();
   scheduleSync();
-  relayout();
 }
 
 /* ---------- share link: the whole state lives in the URL hash ---------- */
@@ -172,14 +170,14 @@ const unb64 = t => { t = t.replace(/-/g,'+').replace(/_/g,'/'); while (t.length 
                      const s = atob(t), a = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i); return a; };
 const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer());
 
-// times travel in whole minutes to keep links short
-const toMin = at => at ? Math.round(at / 60000) : 0;
+// dates travel as 'YYYYMMDD' and times as 'HHMM' to keep links short
+const packD = d => d.replace(/-/g, ''), packT = t => t.replace(':', '');
 function stateArray(){
   const n = count();
   return [n, people.slice(0, n).map(p => [
     p.name,
-    p.exps.filter(e => !isBlank(e)).map(e => [e.amt, e.why, [...e.skip].sort((a,b) => a-b), toMin(e.at)])
-  ]), transfers.map(t => [t.from, t.to, t.amt, t.why, toMin(t.at)])];
+    p.exps.filter(e => !isBlank(e)).map(e => [e.amt, e.why, [...e.skip].sort((a,b) => a-b), packD(e.date), packT(e.time)])
+  ]), transfers.map(t => [t.from, t.to, t.amt, t.why, packD(t.date), packT(t.time)])];
 }
 const hasData = () => { const s = stateArray(); return s[1].some(p => p[0].trim() || p[1].length) || s[2].length > 0; };
 
@@ -193,18 +191,23 @@ async function decodeState(code){
   if (code[0] === 'z') bytes = await pipe(bytes, new DecompressionStream('deflate-raw'));
   else if (code[0] !== 'r') throw new Error('unknown format');
   const [n, list, tlist] = JSON.parse(new TextDecoder().decode(bytes));
-  const now = Date.now(), atOf = v => { const m = parseInt(v, 10); return m > 0 ? m * 60000 : now; };
+  // older links stored a time in minutes since 1970 (0 = none); newer ones store 'YYYYMMDD' + 'HHMM'
+  const when = (d, t) => {
+    if (typeof d === 'number') return d > 0 ? splitAt(d * 60000) : {date:'', time:''};
+    d = String(d || ''); t = String(t || '');
+    return {date: /^\d{8}$/.test(d) ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6)}` : '', time: /^\d{4}$/.test(t) ? `${t.slice(0,2)}:${t.slice(2)}` : ''};
+  };
   const cl = (v, m) => String(v == null ? '' : v).slice(0, m);
   const nn = Math.max(MIN_FRIENDS, Math.min(MAX_FRIENDS, parseInt(n, 10) || MIN_FRIENDS));
   const ppl = (Array.isArray(list) ? list : []).slice(0, nn).map(p => {
     const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 200).map(e => newExp({amt: cl(e[0], 20), why: cl(e[1], 200),
-      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))], at: atOf(e[3])}));
+      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))], ...when(e[3], e[4])}));
     return {name: cl(p[0], 100), exps: exps.length ? exps : [newExp()]};
   });
   while (ppl.length < nn) ppl.push(newFriend());
   const okIdx = v => Number.isInteger(v) && v >= 0 && v < nn;
   const tr = (Array.isArray(tlist) ? tlist : []).slice(0, 500).filter(t => Array.isArray(t) && okIdx(t[0]) && okIdx(t[1]) && t[0] !== t[1])
-    .map(t => ({id: nextId++, from: t[0], to: t[1], amt: cl(t[2], 20), why: cl(t[3], 200), at: atOf(t[4])}));
+    .map(t => ({id: nextId++, from: t[0], to: t[1], amt: cl(t[2], 20), why: cl(t[3], 200), ...when(t[4], t[5])}));
   return {n: nn, people: ppl, transfers: tr};
 }
 const hereUrl = () => location.href.split('#')[0];
@@ -361,7 +364,6 @@ colsEl.addEventListener('input', e => {
     const ex = p.exps[+row.dataset.e];
     if (e.target.classList.contains('am')) ex.amt = e.target.value;
     if (e.target.classList.contains('wy')) ex.why = e.target.value;
-    if (!ex.at && !isBlank(ex)) ex.at = Date.now();   // an expense gets its time when it is first typed
   }
   calc();
 });
@@ -394,7 +396,6 @@ colsEl.addEventListener('click', e => {
     const before = transfers.length, shift = x => x > pi ? x - 1 : x;
     transfers = transfers.filter(t => t.from !== pi && t.to !== pi).map(t => ({...t, from: shift(t.from), to: shift(t.to)}));
     if (transfers.length < before) toast(`Also removed ${before - transfers.length} paid-back ${before - transfers.length === 1 ? 'entry' : 'entries'} with this friend.`);
-    layout.cards.splice(pi, 1); saveLayout();
     build();
   } else if (e.target.closest('.rm')){
     const j = +e.target.closest('.exp').dataset.e;
@@ -406,7 +407,6 @@ $('add-friend').addEventListener('click', () => {
   if (people.length >= MAX_FRIENDS) return;
   const i = people.length;
   people.push(newFriend());
-  layout.cards[i] = defCard(i, true); saveLayout();
   build({p:i, name:true});
 });
 $('reset').addEventListener('click', () => { people.forEach(p => p.exps = [newExp()]); transfers = []; build(); });
@@ -428,7 +428,7 @@ function openMenu(open){
   if (open){ updateExportMenu(); const first = menuEl.querySelector('button:not(:disabled)'); if (first) first.focus(); }
 }
 menuBtn.addEventListener('click', () => openMenu(menuEl.hidden));
-document.addEventListener('click', e => { if (!menuEl.hidden && !e.target.closest('.menu-wrap')) openMenu(false); });
+document.addEventListener('click', e => { if (!menuEl.hidden && !e.target.closest('#export-wrap')) openMenu(false); });
 menuEl.addEventListener('keydown', e => {
   const items = [...menuEl.querySelectorAll('button:not(:disabled)')], i = items.indexOf(document.activeElement);
   if (e.key === 'Escape'){ openMenu(false); menuBtn.focus(); }
@@ -453,6 +453,7 @@ function showTab(t){
   $('page-split').hidden = t !== 'split';
   $('page-ledger').hidden = t !== 'ledger';
   document.querySelectorAll('.split-only').forEach(el => el.hidden = t !== 'split');
+  if (t !== 'split') openLayoutMenu(false);
   if (t === 'split') build(); else renderLedger();
   try { localStorage.setItem(TAB_KEY, t); } catch(e){}
 }
@@ -462,8 +463,8 @@ document.querySelector('.tabs').addEventListener('click', e => { const b = e.tar
 const TYPES = [['exp', 'Expense'], ['for', 'Paid for'], ['back', 'Paid back']];
 const typeName = t => TYPES.find(x => x[0] === t)[1];
 const z2 = v => String(v).padStart(2, '0');
-const localDT = at => { if (!at) return ''; const d = new Date(at); return `${d.getFullYear()}-${z2(d.getMonth()+1)}-${z2(d.getDate())}T${z2(d.getHours())}:${z2(d.getMinutes())}`; };
-const fmtAt = at => at ? new Date(at).toLocaleString(undefined, {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit'}) : '—';
+function splitAt(ms){ const d = new Date(ms); return {date: `${d.getFullYear()}-${z2(d.getMonth()+1)}-${z2(d.getDate())}`, time: `${z2(d.getHours())}:${z2(d.getMinutes())}`}; }
+const fmtDate = d => d ? new Date(d + 'T00:00').toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'}) : '';
 const everyone = () => Array.from({length: count()}, (_, q) => q);
 const otherThan = i => i === 0 ? 1 : 0;
 
@@ -477,15 +478,17 @@ function findEntry(id){
 }
 // the ledger's view of an entry: {id, type, by, to:[friends], amt, why, at}
 function rowOf(f){
-  if (f.kind === 't') return {id: f.t.id, type:'back', by: f.t.from, to:[f.t.to], amt: f.t.amt, why: f.t.why, at: f.t.at};
+  if (f.kind === 't') return {id: f.t.id, type:'back', by: f.t.from, to:[f.t.to], amt: f.t.amt, why: f.t.why, date: f.t.date, time: f.t.time};
   const s = sharers(f.e, count());
-  return {id: f.e.id, type: s.length === 1 && s[0] !== f.p ? 'for' : 'exp', by: f.p, to: s, amt: f.e.amt, why: f.e.why, at: f.e.at};
+  return {id: f.e.id, type: s.length === 1 && s[0] !== f.p ? 'for' : 'exp', by: f.p, to: s, amt: f.e.amt, why: f.e.why, date: f.e.date, time: f.e.time};
 }
 function ledgerRows(){
   const rows = [];
   people.forEach((p, i) => p.exps.forEach((e, j) => { if (!isBlank(e)) rows.push(rowOf({kind:'e', p:i, j, e})); }));
   transfers.forEach((t, k) => rows.push(rowOf({kind:'t', k, t})));
-  return rows.sort((a, b) => (a.at || 0) - (b.at || 0) || a.id - b.id);
+  // dated entries first, in date and time order; entries without a date keep the order they were made
+  const key = r => r.date ? r.date + ' ' + (r.time || '') : '~';
+  return rows.sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : a.id - b.id);
 }
 const forText = r => r.type === 'exp' && r.to.length === count() ? 'Everyone' : r.to.map(nameOf).join(', ');
 // keep a row sensible: "Paid for" / "Paid back" need one other friend, "Expense" needs somebody
@@ -505,12 +508,12 @@ function saveRow(r){
   tidy(r);
   const f = findEntry(r.id);
   if (r.type === 'back'){
-    const t = {id: r.id, from: r.by, to: r.to[0], amt: r.amt, why: r.why, at: r.at};
+    const t = {id: r.id, from: r.by, to: r.to[0], amt: r.amt, why: r.why, date: r.date, time: r.time};
     if (f && f.kind === 't') transfers[f.k] = t;
     else { if (f) dropExp(f.p, f.j); transfers.push(t); }
     return;
   }
-  const fields = {amt: r.amt, why: r.why, at: r.at, skip: everyone().filter(q => !r.to.includes(q))};
+  const fields = {amt: r.amt, why: r.why, date: r.date, time: r.time, skip: everyone().filter(q => !r.to.includes(q))};
   if (f && f.kind === 'e' && f.p === r.by){ Object.assign(f.e, fields); return; }
   const e = f && f.kind === 'e' ? Object.assign(f.e, fields) : newExp({...fields, id: r.id});
   if (f) f.kind === 'e' ? dropExp(f.p, f.j) : transfers.splice(f.k, 1);
@@ -523,7 +526,7 @@ function deleteEntry(id){
 
 let draft = null;        // the "new entry" row
 const newDraft = (keep = {}) => tidy({id: 'new', type: keep.type || 'exp', by: Math.min(keep.by || 0, count() - 1), to: keep.type && keep.type !== 'exp' ? (keep.to || []) : everyone(),
-                                      amt:'', why:'', at: Date.now()});
+                                      amt:'', why:'', date:'', time:''});
 function lgRow(r){
   const isNew = r.id === 'new', n = count();
   const opt = (v, label, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${esc(label)}</option>`;
@@ -535,7 +538,8 @@ function lgRow(r){
     : `<div class="px M field"><select class="lg-to" aria-label="${r.type === 'back' ? 'Paid back to' : 'Paid for'}">${
         everyone().filter(q => q !== r.by).map(q => opt(q, nameOf(q), q === r.to[0])).join('')}</select></div>`;
   return `<tr data-id="${r.id}"${isNew ? ' class="lg-new"' : ''}>
-    <td><div class="px M field"><input class="lg-at" type="datetime-local" value="${localDT(r.at)}" aria-label="Date and time"></div></td>
+    <td><div class="px M field"><input class="lg-date" type="date" value="${esc(r.date)}" aria-label="Date (optional)"></div></td>
+    <td><div class="px M field"><input class="lg-time" type="time" value="${esc(r.time)}" aria-label="Time (optional)"></div></td>
     <td><div class="px M field"><select class="lg-type" aria-label="Type">${TYPES.map(([v, l]) => opt(v, l, v === r.type)).join('')}</select></div></td>
     <td><div class="px M field"><select class="lg-by" aria-label="Paid by">${everyone().map(q => opt(q, nameOf(q), q === r.by)).join('')}</select></div></td>
     <td><div class="px M field"><input class="lg-amt" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(r.amt)}" aria-label="Amount"></div></td>
@@ -551,7 +555,7 @@ function renderLedger(focus){
   $('lg-new').innerHTML = lgRow(draft);
   const rows = ledgerRows();
   $('lg-body').innerHTML = rows.length ? rows.map(lgRow).join('')
-    : '<tr class="lg-empty"><td colspan="7">No entries yet. Add one above, or type amounts on the Split page.</td></tr>';
+    : '<tr class="lg-empty"><td colspan="8">No entries yet. Add one above, or type amounts on the Split page.</td></tr>';
   ledgerTotals(rows);
   if (focus){
     const el = document.querySelector(`#page-ledger tr[data-id="${focus.id}"] ${focus.sel}`);
@@ -579,8 +583,9 @@ ledgerEl.addEventListener('input', e => {
 });
 ledgerEl.addEventListener('change', e => {
   const t = e.target, r = rowFrom(t); if (!r) return;
-  const cls = ['lg-at', 'lg-type', 'lg-by', 'lg-to'].find(c => t.classList.contains(c)); if (!cls) return;
-  if (cls === 'lg-at') r.at = t.value ? new Date(t.value).getTime() : Date.now();
+  const cls = ['lg-date', 'lg-time', 'lg-type', 'lg-by', 'lg-to'].find(c => t.classList.contains(c)); if (!cls) return;
+  if (cls === 'lg-date') r.date = t.value;
+  if (cls === 'lg-time') r.time = t.value;
   if (cls === 'lg-type'){ r.type = t.value; if (r.type === 'exp') r.to = everyone(); }
   if (cls === 'lg-by') r.by = +t.value;
   if (cls === 'lg-to') r.to = [+t.value];
@@ -604,7 +609,7 @@ ledgerEl.addEventListener('click', e => {
 ledgerEl.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('.lg-new') && e.target.matches('input')) addDraft(); });
 function addDraft(){
   if (!(toPaise(draft.amt) > 0)){ toast('Type an amount first.'); document.querySelector('.lg-new .lg-amt').focus(); return; }
-  saveRow({...draft, id: nextId++, at: draft.at || Date.now()});
+  saveRow({...draft, id: nextId++});
   draft = newDraft(draft);
   calc(); renderLedger({id: 'new', sel: '.lg-amt'});
 }
@@ -667,10 +672,9 @@ function downloadBlob(blob, name){
 
 /* ---------- ledger exports: picture, PDF, CSV and Excel (all written here, so they work offline) ---------- */
 function ledgerTable(){
-  return ledgerRows().map(r => ({at: r.at, type: typeName(r.type), by: nameOf(r.by), amt: toPaise(r.amt), to: forText(r), why: r.why.trim()}));
+  return ledgerRows().map(r => ({date: r.date, time: r.time, type: typeName(r.type), by: nameOf(r.by), amt: toPaise(r.amt), to: forText(r), why: r.why.trim()}));
 }
-const LG_HEAD = ['Date & time', 'Type', 'Paid by', 'Amount (₹)', 'For / to', 'Note'];
-const isoAt = at => at ? localDT(at).replace('T', ' ') : '';
+const LG_HEAD = ['Date', 'Time', 'Type', 'Paid by', 'Amount (₹)', 'For / to', 'Note'];
 async function exportLedger(x){
   const rows = ledgerTable(); if (!rows.length) return;
   if (x === 'lg-png' || x === 'lg-pdf'){
@@ -679,14 +683,14 @@ async function exportLedger(x){
     return showPreview(x, {blob, file: x === 'lg-pdf' ? await canvasPdf(c) : blob, name: 'split-da-money-ledger.' + x.slice(3)});
   }
   const html = `<table class="ledger plain"><thead><tr>${LG_HEAD.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
-    rows.map(r => `<tr><td>${esc(isoAt(r.at))}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td class="num">${(r.amt/100).toFixed(2)}</td><td>${esc(r.to)}</td><td>${esc(r.why)}</td></tr>`).join('')
+    rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td class="num">${(r.amt/100).toFixed(2)}</td><td>${esc(r.to)}</td><td>${esc(r.why)}</td></tr>`).join('')
   }</tbody></table>`;
   const file = x === 'csv' ? ledgerCsv(rows) : ledgerXlsx(rows);
   showPreview(x, {html, file, name: 'split-da-money-ledger.' + x});
 }
 function ledgerCsv(rows){
   const cell = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
-  const lines = [LG_HEAD, ...rows.map(r => [isoAt(r.at), r.type, r.by, (r.amt/100).toFixed(2), r.to, r.why])].map(l => l.map(v => cell(String(v))).join(','));
+  const lines = [LG_HEAD, ...rows.map(r => [r.date, r.time, r.type, r.by, (r.amt/100).toFixed(2), r.to, r.why])].map(l => l.map(v => cell(String(v))).join(','));
   return new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], {type: 'text/csv;charset=utf-8'});   // BOM so Excel reads UTF-8
 }
 
@@ -714,22 +718,23 @@ function ledgerXlsx(rows){
   const col = i => String.fromCharCode(65 + i);
   const str = (r, i, v, st) => `<c r="${col(i)}${r}" t="inlineStr"${st ? ` s="${st}"` : ''}><is><t xml:space="preserve">${x(v)}</t></is></c>`;
   const num = (r, i, v, st) => `<c r="${col(i)}${r}" s="${st}"><v>${v}</v></c>`;
-  // Excel dates are days since 1899-12-30, in local time
-  const serial = at => { const d = new Date(at); return (Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()) - Date.UTC(1899, 11, 30)) / 864e5; };
+  // Excel dates are days since 1899-12-30; a time is a fraction of a day
+  const daySerial = d => (Date.UTC(+d.slice(0,4), +d.slice(5,7) - 1, +d.slice(8,10)) - Date.UTC(1899, 11, 30)) / 864e5;
+  const timeSerial = t => (+t.slice(0,2) * 60 + +t.slice(3,5)) / 1440;
   const total = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
   const body = [
     `<row r="1">${LG_HEAD.map((h, i) => str(1, i, h, 1)).join('')}</row>`,
     ...rows.map((r, k) => { const n = k + 2;
-      return `<row r="${n}">${r.at ? num(n, 0, serial(r.at), 2) : str(n, 0, '')}${str(n, 1, r.type)}${str(n, 2, r.by)}${num(n, 3, (r.amt/100).toFixed(2), 3)}${str(n, 4, r.to)}${str(n, 5, r.why)}</row>`; }),
-    `<row r="${rows.length + 2}">${str(rows.length + 2, 2, 'Total spent', 1)}${num(rows.length + 2, 3, (total/100).toFixed(2), 4)}</row>`
+      return `<row r="${n}">${r.date ? num(n, 0, daySerial(r.date), 2) : str(n, 0, '')}${r.time ? num(n, 1, timeSerial(r.time).toFixed(10), 5) : str(n, 1, '')}${str(n, 2, r.type)}${str(n, 3, r.by)}${num(n, 4, (r.amt/100).toFixed(2), 3)}${str(n, 5, r.to)}${str(n, 6, r.why)}</row>`; }),
+    `<row r="${rows.length + 2}">${str(rows.length + 2, 3, 'Total spent', 1)}${num(rows.length + 2, 4, (total/100).toFixed(2), 4)}</row>`
   ].join('');
-  const widths = [20, 12, 16, 14, 28, 36];
+  const widths = [12, 8, 12, 16, 14, 28, 36];
   return zipStore([
     ['[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'],
     ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
     ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Ledger" sheetId="1" r:id="rId1"/></sheets></workbook>'],
     ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
-    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd hh:mm"/><numFmt numFmtId="165" formatCode="&quot;₹&quot;#,##0.00"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF3CC4CF"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="&quot;₹&quot;#,##0.00"/><numFmt numFmtId="166" formatCode="hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF3CC4CF"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
     ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths.map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${body}</sheetData></worksheet>`]
   ]);
 }
@@ -738,8 +743,7 @@ async function renderLedgerPicture(rows){
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
   const W = xo.width === 'wide' ? 1200 : 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
   const bx = pad + 26, bw = inner - 52, rowH = 38, headH = 40, pillH = 38;
-  const COLS_LG = [['Date & time', .24], ['Type', .12], ['Paid by', .14], ['Amount', .13, 'right'], ['For / to', .18], ['Note', .19]];
-  const shortAt = at => at ? new Date(at).toLocaleString(undefined, {day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false}) : '—';
+  const COLS_LG = [['Date', .15], ['Time', .08], ['Type', .12], ['Paid by', .14], ['Amount', .13, 'right'], ['For / to', .18], ['Note', .20]];
   const tableH = headH + rows.length * rowH;
   const panelH = 22 + pillH + 18 + tableH + 16 + 40 + 24;
   const H = 88 + gap + panelH + gap + 52;
@@ -770,10 +774,10 @@ async function renderLedgerPicture(rows){
   rows.forEach((r, k) => {
     const ry = ty + 4 + headH + k * rowH;
     if (k % 2){ ctx.fillStyle = '#f7ebc6'; ctx.fillRect(bx + 4, ry, bw - 8, rowH); }
-    const vals = [shortAt(r.at), r.type, r.by, fmt(r.amt), r.to, r.why || '—'];
+    const vals = [fmtDate(r.date) || '—', r.time || '—', r.type, r.by, fmt(r.amt), r.to, r.why || '—'];
     vals.forEach((v, i) => {
       const [, f, al] = COLS_LG[i], w = (bw - 8) * f;
-      txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 1 && r.type === 'Paid back' ? '#2f7a3a' : INK);
+      txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 2 && r.type === 'Paid back' ? '#2f7a3a' : INK);
     });
   });
   const spent = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
@@ -1025,155 +1029,128 @@ async function canvasPdf(c){
   return new Blob(parts, {type: 'application/pdf'});
 }
 
-/* ---------- layout: snap-to-grid dashboard, saved in this browser ----------
-   Panels and friend cards sit on a 12-column grid with 8px rows. Each block has a stored box {x, y, w, h}
-   (h = 0 means "as tall as its content"); blocks fall upward to fill gaps and never overlap. */
-const COLS = 24, ROW = 4, LAYOUT_KEY = 'sdm-layout', LAYOUT_V = 2;
-const defPanels = () => ({friends:{x:0, y:0, w:24, h:0}, results:{x:0, y:1, w:24, h:0}});
-const defCard = (i, last, per = 3) => ({x:(i % per) * (COLS / per), y:last ? 1e6 : i, w:COLS / per, h:0});
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const goodBox = b => b && ['x','y','w','h'].every(k => Number.isFinite(b[k]));
+/* ---------- layout: drag the dotted handle to reorder friends and sections; the Layout menu picks
+   stacked / side-by-side sections and friend cards per row. Saved in this browser. ---------- */
+const LAYOUT_KEY = 'sdm-layout', LAYOUT_V = 3, PANELS = ['friends', 'results'];
+const defLayout = () => ({v: LAYOUT_V, order: [...PANELS], side: false, per: 0});   // per 0 = as many as fit
 function loadLayout(){
-  const l = {v: LAYOUT_V, panels: defPanels(), cards: []};
+  const l = defLayout();
   try {
     const s = JSON.parse(localStorage.getItem(LAYOUT_KEY));
-    if (s && s.v !== LAYOUT_V){             // v1 used 12 columns and 8px rows: scale everything by 2
-      [...Object.values(s.panels || {}), ...(s.cards || [])].forEach(b => { if (goodBox(b)) for (const k of ['x','y','w','h']) b[k] *= 2; });
+    if (s && s.v === LAYOUT_V){
+      if (Array.isArray(s.order) && s.order.length === PANELS.length && PANELS.every(k => s.order.includes(k))) l.order = s.order;
+      l.side = s.side === true;
+      if ([0,1,2,3,4].includes(s.per)) l.per = s.per;
     }
-    if (s && s.panels) for (const k in l.panels) if (goodBox(s.panels[k])) l.panels[k] = s.panels[k];
-    if (s && Array.isArray(s.cards)) l.cards = s.cards.map((b, i) => goodBox(b) ? b : defCard(i));
   } catch(e){}
   return l;
 }
 const saveLayout = () => { try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch(e){} };
 let layout = loadLayout();
-const cardBox = i => layout.cards[i] || (layout.cards[i] = defCard(i));
-
-const GRIDS = {
-  cols: {el: colsEl, gap: 22, minPx: 200,
-         items: () => [...colsEl.querySelectorAll(':scope > .friend')].map(el => ({el, box: cardBox(+el.dataset.p)}))},
-  main: {el: boardEl, gap: 28, minPx: 320,
-         items: () => [...boardEl.querySelectorAll(':scope > [data-panel]')].map(el => ({el, box: layout.panels[el.dataset.panel]}))}
-};
-const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-// place blocks in reading order, each one as high as it fits; the block being dragged goes first on ties.
-// When the grid is too narrow for some block's chosen width, all blocks get equal columns instead.
-function pack(its, minW, pinned){
-  const forced = its.some(it => it.box.w < minW), per = Math.floor(COLS / minW), fw = Math.floor(COLS / per);
-  its.forEach(it => { it.h = Math.max(it.box.h, it.need); });
-  its.sort((a, b) => a.box.y - b.box.y || a.box.x - b.box.x || (a.box === pinned ? -1 : b.box === pinned ? 1 : 0));
-  its.forEach((it, j) => {
-    it.w = forced ? fw : clamp(it.box.w, minW, COLS);
-    it.x = forced ? (j % per) * fw : clamp(it.box.x, 0, COLS - it.w);
+function applyLayout(){
+  layout.order.forEach(k => boardEl.appendChild(boardEl.querySelector(`[data-panel="${k}"]`)));
+  boardEl.querySelectorAll('[data-panel] .pill[data-title]').forEach((p, i) => p.textContent = `${i + 1}. ${p.dataset.title}`);
+  boardEl.classList.toggle('side', layout.side);
+  boardEl.classList.toggle('res-first', layout.order[0] === 'results');
+  colsEl.style.setProperty('--per', layout.per || 'auto');
+  colsEl.classList.toggle('per', layout.per > 0);
+  layoutMenu.querySelectorAll('[data-l]').forEach(b => {
+    const [k, v] = b.dataset.l.split(':');
+    if (k !== 'reset') b.setAttribute('aria-checked', k === 'side' ? String(layout.side) === v : String(layout.per) === v);
   });
-  const placed = [];
-  for (const it of its){
-    it.y = 0;
-    for (let hit; (hit = placed.find(p => overlap(p, it))); ) it.y = hit.y + hit.h;
-    placed.push(it);
-  }
-  return its;
 }
-function layoutAll(){
-  for (let pass = 0; pass < 4; pass++){            // repeat while a width change alters some block's height
-    let changed = false;
-    for (const key of ['cols', 'main']){
-      const g = GRIDS[key], its = g.items();
-      const step = g.el.clientWidth / COLS;
-      const minW = clamp(Math.ceil((g.minPx + g.gap) / step), 1, COLS);
-      its.forEach(it => {
-        const cs = getComputedStyle(it.el);
-        const natural = it.el.querySelector(':scope > .gi-in').offsetHeight + parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
-        it.need = Math.ceil((natural + g.gap) / ROW);
-      });
-      pack(its, minW, drag && drag.key === key ? drag.box : null).forEach(it => {
-        const pos = `${it.x + 1} / span ${it.w}|${it.y + 1} / span ${it.h}`;
-        if (it.el.dataset.pos !== pos){
-          it.el.dataset.pos = pos;
-          [it.el.style.gridColumn, it.el.style.gridRow] = pos.split('|');
-          changed = true;
-        }
-        if (!drag) it.box.y = it.y;               // keep the stored order tidy
-      });
-    }
-    if (!changed) break;
-  }
-  boardEl.classList.add('ready');
-  if (drag) followDrag();
-}
-let layoutFrame = 0;
-function relayout(){ cancelAnimationFrame(layoutFrame); layoutFrame = requestAnimationFrame(layoutAll); }
 
-let drag = null;        // {key, el, box, mode: 'move'|'size', off, px, py, ph}
-function followDrag(){
-  const {el, ph} = drag;
-  [ph.style.gridColumn, ph.style.gridRow] = [el.style.gridColumn, el.style.gridRow];
-  if (drag.mode !== 'move') return;
-  el.style.transform = '';
-  const r = el.getBoundingClientRect();
-  el.style.transform = `translate(${drag.px - drag.off.x - r.left}px, ${drag.py - drag.off.y - r.top}px)`;
+// reorder friends: the people array itself moves, so links and exports keep the order
+function reorderPeople(order){                      // order = old indices in their new order
+  const to = []; order.forEach((old, neu) => to[old] = neu);
+  people = order.map(i => people[i]);
+  people.forEach(p => p.exps.forEach(e => e.skip = e.skip.map(q => to[q] ?? q)));
+  transfers.forEach(t => { t.from = to[t.from]; t.to = to[t.to]; });
+  draft = null;
 }
+function finishMove(list){
+  if (list === colsEl){
+    const order = [...colsEl.children].map(el => +el.dataset.p);
+    if (order.some((v, i) => v !== i)){ reorderPeople(order); build(); }
+  } else {
+    layout.order = [...boardEl.children].map(el => el.dataset.panel);
+    saveLayout(); applyLayout();
+  }
+}
+// where in the list the dragged block should go, given the pointer
+function dropSpot(list, el, x, y){
+  const across = getComputedStyle(list).gridTemplateColumns.split(' ').length > 1;
+  for (const sib of list.children){
+    if (sib === el) continue;
+    const r = sib.getBoundingClientRect();
+    if (y < r.top || y > r.bottom || x < r.left || x > r.right) continue;
+    const after = across ? x > r.left + r.width/2 : y > r.top + r.height/2;
+    return after ? sib.nextSibling : sib;
+  }
+  return undefined;
+}
+let drag = null;        // {el, list, id}
 document.addEventListener('pointerdown', e => {
-  const h = e.target.closest('.grip, .sizer');
+  const h = e.target.closest('.grip');
   if (!h || e.button !== 0) return;
-  const el = h.closest('.friend, [data-panel]'), key = el.classList.contains('friend') ? 'cols' : 'main';
-  const box = key === 'cols' ? cardBox(+el.dataset.p) : layout.panels[el.dataset.panel];
-  const r = el.getBoundingClientRect();
-  const ph = document.createElement('div'); ph.className = 'gph';
-  GRIDS[key].el.appendChild(ph);
-  drag = {key, el, box, mode: h.classList.contains('grip') ? 'move' : 'size', off: {x: e.clientX - r.left, y: e.clientY - r.top}, px: e.clientX, py: e.clientY, ph};
+  const el = h.closest('.friend, [data-panel]');
+  drag = {el, list: el.parentElement, id: e.pointerId};
   el.classList.add('dragging'); document.body.classList.add('is-dragging');
   h.setPointerCapture(e.pointerId);
-  e.preventDefault();
-  getSelection().removeAllRanges();
-  layoutAll();
+  e.preventDefault(); getSelection().removeAllRanges();
 });
 document.addEventListener('pointermove', e => {
-  if (!drag) return;
-  const g = GRIDS[drag.key], gr = g.el.getBoundingClientRect(), step = g.el.clientWidth / COLS;
-  drag.px = e.clientX; drag.py = e.clientY;
-  if (drag.mode === 'move'){
-    drag.box.x = clamp(Math.round((e.clientX - drag.off.x - gr.left) / step), 0, COLS - 1);
-    drag.box.y = Math.round((e.clientY - drag.off.y - gr.top) / ROW);
-  } else {
-    const r = drag.el.getBoundingClientRect();
-    drag.box.w = clamp(Math.round((e.clientX - r.left + g.gap) / step), 1, COLS);
-    drag.box.h = Math.max(1, Math.round((e.clientY - r.top + g.gap) / ROW));
-  }
-  layoutAll();
+  if (!drag || e.pointerId !== drag.id) return;
+  const spot = dropSpot(drag.list, drag.el, e.clientX, e.clientY);
+  if (spot !== undefined && spot !== drag.el && spot !== drag.el.nextSibling) drag.list.insertBefore(drag.el, spot);
 });
 function endDrag(){
   if (!drag) return;
-  drag.el.style.transform = '';
   drag.el.classList.remove('dragging'); document.body.classList.remove('is-dragging');
-  drag.ph.remove();
-  drag = null;
-  layoutAll(); saveLayout();
+  const list = drag.list; drag = null;
+  finishMove(list);
 }
 document.addEventListener('pointerup', endDrag);
-document.addEventListener('selectstart', e => { if (drag) e.preventDefault(); });
 document.addEventListener('pointercancel', endDrag);
-const PRESETS = {
-  default:   () => ({panels: defPanels(), cards: people.map((_, i) => defCard(i))}),
-  side:      () => ({panels: {friends:{x:0, y:0, w:15, h:0}, results:{x:15, y:0, w:9, h:0}}}),
-  sideLeft:  () => ({panels: {results:{x:0, y:0, w:9, h:0}, friends:{x:9, y:0, w:15, h:0}}}),
-  resFirst:  () => ({panels: {results:{x:0, y:0, w:24, h:0}, friends:{x:0, y:1, w:24, h:0}}}),
-  cards1:    () => ({cards: people.map((_, i) => defCard(i, false, 1))}),
-  cards2:    () => ({cards: people.map((_, i) => defCard(i, false, 2))}),
-  cards3:    () => ({cards: people.map((_, i) => defCard(i, false, 3))}),
-  cards4:    () => ({cards: people.map((_, i) => defCard(i, false, 4))})
-};
-$('layout-preset').addEventListener('change', e => {
-  const p = PRESETS[e.target.value];
-  e.target.value = '';
-  if (!p) return;
-  Object.assign(layout, p(), {v: LAYOUT_V});
-  saveLayout(); layoutAll();
+document.addEventListener('selectstart', e => { if (drag) e.preventDefault(); });
+// keyboard: arrow keys on a handle move the block one place
+document.addEventListener('keydown', e => {
+  const h = e.target.closest && e.target.closest('.grip');
+  if (!h || !['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
+  e.preventDefault();
+  const el = h.closest('.friend, [data-panel]'), list = el.parentElement, back = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+  const sib = back ? el.previousElementSibling : el.nextElementSibling;
+  if (!sib) return;
+  list.insertBefore(el, back ? sib : sib.nextSibling);
+  const key = el.dataset.panel || null, pos = [...list.children].indexOf(el);
+  finishMove(list);
+  const again = key ? boardEl.querySelector(`[data-panel="${key}"] > .grip`) : colsEl.children[pos].querySelector('.grip');
+  if (again) again.focus();
+});
+
+const layoutMenu = $('layout-list'), layoutBtn = $('layout-menu');
+function openLayoutMenu(open){
+  layoutMenu.hidden = !open; layoutBtn.setAttribute('aria-expanded', open);
+  if (open) layoutMenu.querySelector('button').focus();
+}
+layoutBtn.addEventListener('click', () => openLayoutMenu(layoutMenu.hidden));
+document.addEventListener('click', e => { if (!layoutMenu.hidden && !e.target.closest('#layout-wrap')) openLayoutMenu(false); });
+layoutMenu.addEventListener('keydown', e => {
+  const items = [...layoutMenu.querySelectorAll('button')], i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape'){ openLayoutMenu(false); layoutBtn.focus(); }
+  else if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus(); }
+});
+layoutMenu.addEventListener('click', e => {
+  const b = e.target.closest('[data-l]'); if (!b) return;
+  const [k, v] = b.dataset.l.split(':');
+  if (k === 'side') layout.side = v === 'true';
+  else if (k === 'per') layout.per = +v;
+  else layout = defLayout();
+  saveLayout(); applyLayout();
 });
 boardEl.querySelectorAll('[data-panel]').forEach(p => p.insertAdjacentHTML('beforeend',
-  `<button class="px M btn grip" type="button" title="Drag to move" aria-label="Move this block">${ICON_GRIP}</button><span class="sizer" title="Drag to resize">${ICON_SIZE}</span>`));
-window.addEventListener('resize', relayout);
-if (document.fonts) document.fonts.ready.then(relayout);
+  `<button class="px M btn grip" type="button" title="Drag to move (or use the arrow keys)" aria-label="Move this section">${ICON_GRIP}</button>`));
+applyLayout();
 
 (async () => {
   if (!await loadFromHash()) people = Array.from({length:3}, newFriend);
