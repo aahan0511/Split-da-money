@@ -95,7 +95,7 @@ select{width:100%;font:700 13px var(--font);color:var(--ink);background:transpar
 .board.side.res-first{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}
 @media (max-width:860px){.board.side,.board.side.res-first{grid-template-columns:minmax(0,1fr)}}
 /* friend cards: as many as fit, or at most --per per row (fewer when the screen is narrow) */
-.cols{display:grid;gap:22px;align-items:start;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.cols{display:grid;gap:22px;align-items:start;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 .cols.per{grid-template-columns:repeat(auto-fill,minmax(max(220px,calc((100% - (var(--per) - 1) * 22px) / var(--per))),1fr))}
 .dragging{opacity:.55;outline:3px dashed var(--ink);outline-offset:4px}
 .is-dragging,.is-dragging *{cursor:grabbing !important;user-select:none}
@@ -164,7 +164,6 @@ li.t{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .tab{--fill:var(--cream);font-size:13px}
 .tab[aria-selected="true"]{--fill:var(--ink);color:var(--cream)}
 .tab[aria-selected="true"]::before{filter:none}
-.split-only[hidden]{display:block;visibility:hidden}   /* keeps its space so the top bar doesn't shift */
 .menu-wrap{position:relative}
 .caret{display:inline-block;width:0;height:0;margin-left:6px;vertical-align:middle;border:5px solid transparent;border-top:6px solid currentColor;border-bottom:0}
 .menu{position:absolute;right:0;top:calc(100% + 8px);z-index:30;min-width:240px;--fill:var(--cream);padding:calc(var(--b) + 8px) calc(var(--b) + 6px);
@@ -210,3 +209,15 @@ table.plain{width:100%;border-collapse:collapse;font-size:12px}
 @media (max-width:520px){.menu{position:fixed;left:16px;right:16px;top:auto;margin-top:8px;min-width:0}}
 .menu button[aria-checked="true"]::before{content:"\2713  "}
 .menu button[role="menuitemradio"]:not([aria-checked="true"]){padding-left:28px}
+.menu.left{left:0;right:auto}
+.lg-foot{display:flex;gap:14px;align-items:flex-start;margin-top:16px;flex-wrap:wrap}
+.lg-foot .lg-total{flex:1;margin:0;min-width:240px}
+.lg-total .pbk{display:block;font-weight:400;margin-top:2px}
+.ledger td.mv{width:40px;padding-right:0}
+.ledger .grip{width:28px;height:28px}
+.ledger tr.dragging td{background:#fff2a6}
+.ledger tr.dragging{outline:none;opacity:.7}
+.dt{display:flex;align-items:center;gap:4px}
+.dt .field{flex:1;min-width:0}
+.clr{width:22px;height:22px;padding:0;flex:none;display:flex;align-items:center;justify-content:center;--fill:var(--cream)}
+.clr svg{display:block;width:10px;height:10px}

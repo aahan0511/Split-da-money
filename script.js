@@ -24,10 +24,11 @@
 const $ = id => document.getElementById(id);
 const colsEl = $('cols'), boardEl = $('board');
 let nextId = 1;
-const newExp = (o = {}) => ({id: nextId++, amt:'', why:'', skip:[], date:'', time:'', ...o});
+// ord = position in the ledger (new entries go last)
+const newExp = (o = {}) => { const id = nextId++; return {id, ord: id, amt:'', why:'', skip:[], date:'', time:'', ...o}; };
 // date 'YYYY-MM-DD' and time 'HH:MM' are both optional ('' = not given)
 let people = [];        // [{name, exps:[{id, amt, why, skip:[friend indices left out], date, time, open}]}]
-let transfers = [];     // paid back: [{id, from, to, amt, why, date, time}]
+let transfers = [];     // paid back: [{id, ord, from, to, amt, why, date, time}]
 const isBlank = e => e.amt === '' && e.why === '';
 let last = null;        // latest result, used for the picture
 
@@ -173,11 +174,11 @@ const pipe = async (bytes, stream) => new Uint8Array(await new Response(new Blob
 // dates travel as 'YYYYMMDD' and times as 'HHMM' to keep links short
 const packD = d => d.replace(/-/g, ''), packT = t => t.replace(':', '');
 function stateArray(){
-  const n = count();
+  const n = count(), pos = new Map(ledgerRows().map((r, i) => [r.id, i]));
   return [n, people.slice(0, n).map(p => [
     p.name,
-    p.exps.filter(e => !isBlank(e)).map(e => [e.amt, e.why, [...e.skip].sort((a,b) => a-b), packD(e.date), packT(e.time)])
-  ]), transfers.map(t => [t.from, t.to, t.amt, t.why, packD(t.date), packT(t.time)])];
+    p.exps.filter(e => !isBlank(e)).map(e => [e.amt, e.why, [...e.skip].sort((a,b) => a-b), packD(e.date), packT(e.time), pos.get(e.id)])
+  ]), transfers.map(t => [t.from, t.to, t.amt, t.why, packD(t.date), packT(t.time), pos.get(t.id)])];
 }
 const hasData = () => { const s = stateArray(); return s[1].some(p => p[0].trim() || p[1].length) || s[2].length > 0; };
 
@@ -201,13 +202,17 @@ async function decodeState(code){
   const nn = Math.max(MIN_FRIENDS, Math.min(MAX_FRIENDS, parseInt(n, 10) || MIN_FRIENDS));
   const ppl = (Array.isArray(list) ? list : []).slice(0, nn).map(p => {
     const exps = (Array.isArray(p[1]) ? p[1] : []).slice(0, 200).map(e => newExp({amt: cl(e[0], 20), why: cl(e[1], 200),
-      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))], ...when(e[3], e[4])}));
+      skip: [...new Set((Array.isArray(e[2]) ? e[2] : []).map(Number).filter(q => Number.isInteger(q) && q >= 0 && q < nn))], ...when(e[3], e[4]), ord: Number.isInteger(e[5]) ? e[5] : null}));
     return {name: cl(p[0], 100), exps: exps.length ? exps : [newExp()]};
   });
   while (ppl.length < nn) ppl.push(newFriend());
   const okIdx = v => Number.isInteger(v) && v >= 0 && v < nn;
   const tr = (Array.isArray(tlist) ? tlist : []).slice(0, 500).filter(t => Array.isArray(t) && okIdx(t[0]) && okIdx(t[1]) && t[0] !== t[1])
-    .map(t => ({id: nextId++, from: t[0], to: t[1], amt: cl(t[2], 20), why: cl(t[3], 200), ...when(t[4], t[5])}));
+    .map(t => ({id: nextId++, from: t[0], to: t[1], amt: cl(t[2], 20), why: cl(t[3], 200), ...when(t[4], t[5]), ord: Number.isInteger(t[6]) ? t[6] : null}));
+  // links from before rows could be reordered: put them in date order, as the ledger showed them then
+  const all = [...ppl.flatMap(p => p.exps.filter(e => !isBlank(e))), ...tr];
+  if (all.some(x => x.ord === null)) all.sort(byDate).forEach((x, i) => x.ord = i);
+  ppl.forEach(p => p.exps.forEach(e => { if (e.ord === null) e.ord = e.id; }));
   return {n: nn, people: ppl, transfers: tr};
 }
 const hereUrl = () => location.href.split('#')[0];
@@ -452,7 +457,6 @@ function showTab(t){
   document.querySelectorAll('.tab').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === t));
   $('page-split').hidden = t !== 'split';
   $('page-ledger').hidden = t !== 'ledger';
-  document.querySelectorAll('.split-only').forEach(el => el.hidden = t !== 'split');
   if (t !== 'split') openLayoutMenu(false);
   if (t === 'split') build(); else renderLedger();
   try { localStorage.setItem(TAB_KEY, t); } catch(e){}
@@ -478,18 +482,20 @@ function findEntry(id){
 }
 // the ledger's view of an entry: {id, type, by, to:[friends], amt, why, at}
 function rowOf(f){
-  if (f.kind === 't') return {id: f.t.id, type:'back', by: f.t.from, to:[f.t.to], amt: f.t.amt, why: f.t.why, date: f.t.date, time: f.t.time};
+  if (f.kind === 't') return {id: f.t.id, ord: f.t.ord, type:'back', by: f.t.from, to:[f.t.to], amt: f.t.amt, why: f.t.why, date: f.t.date, time: f.t.time};
   const s = sharers(f.e, count());
-  return {id: f.e.id, type: s.length === 1 && s[0] !== f.p ? 'for' : 'exp', by: f.p, to: s, amt: f.e.amt, why: f.e.why, date: f.e.date, time: f.e.time};
+  return {id: f.e.id, ord: f.e.ord, type: s.length === 1 && s[0] !== f.p ? 'for' : 'exp', by: f.p, to: s, amt: f.e.amt, why: f.e.why, date: f.e.date, time: f.e.time};
 }
 function ledgerRows(){
   const rows = [];
   people.forEach((p, i) => p.exps.forEach((e, j) => { if (!isBlank(e)) rows.push(rowOf({kind:'e', p:i, j, e})); }));
   transfers.forEach((t, k) => rows.push(rowOf({kind:'t', k, t})));
-  // dated entries first, in date and time order; entries without a date keep the order they were made
-  const key = r => r.date ? r.date + ' ' + (r.time || '') : '~';
-  return rows.sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : a.id - b.id);
+  return rows.sort((a, b) => a.ord - b.ord || a.id - b.id);
 }
+// "Sort by date": dated entries first in date and time order, undated ones after in their current order
+const dateKey = r => r.date ? r.date + ' ' + (r.time || '') : '~';
+const byDate = (a, b) => dateKey(a) < dateKey(b) ? -1 : dateKey(a) > dateKey(b) ? 1 : (a.ord ?? a.id) - (b.ord ?? b.id);
+function setOrder(ids){ ids.forEach((id, i) => { const f = findEntry(id); if (f) (f.kind === 'e' ? f.e : f.t).ord = i; }); }
 const forText = r => r.type === 'exp' && r.to.length === count() ? 'Everyone' : r.to.map(nameOf).join(', ');
 // keep a row sensible: "Paid for" / "Paid back" need one other friend, "Expense" needs somebody
 function tidy(r){
@@ -508,12 +514,12 @@ function saveRow(r){
   tidy(r);
   const f = findEntry(r.id);
   if (r.type === 'back'){
-    const t = {id: r.id, from: r.by, to: r.to[0], amt: r.amt, why: r.why, date: r.date, time: r.time};
+    const t = {id: r.id, ord: r.ord, from: r.by, to: r.to[0], amt: r.amt, why: r.why, date: r.date, time: r.time};
     if (f && f.kind === 't') transfers[f.k] = t;
     else { if (f) dropExp(f.p, f.j); transfers.push(t); }
     return;
   }
-  const fields = {amt: r.amt, why: r.why, date: r.date, time: r.time, skip: everyone().filter(q => !r.to.includes(q))};
+  const fields = {ord: r.ord, amt: r.amt, why: r.why, date: r.date, time: r.time, skip: everyone().filter(q => !r.to.includes(q))};
   if (f && f.kind === 'e' && f.p === r.by){ Object.assign(f.e, fields); return; }
   const e = f && f.kind === 'e' ? Object.assign(f.e, fields) : newExp({...fields, id: r.id});
   if (f) f.kind === 'e' ? dropExp(f.p, f.j) : transfers.splice(f.k, 1);
@@ -537,9 +543,11 @@ function lgRow(r){
       }).join('')}</div>`
     : `<div class="px M field"><select class="lg-to" aria-label="${r.type === 'back' ? 'Paid back to' : 'Paid for'}">${
         everyone().filter(q => q !== r.by).map(q => opt(q, nameOf(q), q === r.to[0])).join('')}</select></div>`;
+  const clr = (f, label) => r[f] ? `<button class="px M btn clr lg-clr" type="button" data-f="${f}" title="Remove the ${label}" aria-label="Remove the ${label}">${ICON_RM}</button>` : '';
   return `<tr data-id="${r.id}"${isNew ? ' class="lg-new"' : ''}>
-    <td><div class="px M field"><input class="lg-date" type="date" value="${esc(r.date)}" aria-label="Date (optional)"></div></td>
-    <td><div class="px M field"><input class="lg-time" type="time" value="${esc(r.time)}" aria-label="Time (optional)"></div></td>
+    <td class="mv">${isNew ? '' : `<button class="px M btn grip" type="button" title="Drag to move (or use the arrow keys)" aria-label="Move this row">${ICON_GRIP}</button>`}</td>
+    <td><div class="dt"><div class="px M field"><input class="lg-date" type="date" value="${esc(r.date)}" aria-label="Date (optional)"></div>${clr('date', 'date')}</div></td>
+    <td><div class="dt"><div class="px M field"><input class="lg-time" type="time" value="${esc(r.time)}" aria-label="Time (optional)"></div>${clr('time', 'time')}</div></td>
     <td><div class="px M field"><select class="lg-type" aria-label="Type">${TYPES.map(([v, l]) => opt(v, l, v === r.type)).join('')}</select></div></td>
     <td><div class="px M field"><select class="lg-by" aria-label="Paid by">${everyone().map(q => opt(q, nameOf(q), q === r.by)).join('')}</select></div></td>
     <td><div class="px M field"><input class="lg-amt" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" value="${esc(r.amt)}" aria-label="Amount"></div></td>
@@ -555,18 +563,29 @@ function renderLedger(focus){
   $('lg-new').innerHTML = lgRow(draft);
   const rows = ledgerRows();
   $('lg-body').innerHTML = rows.length ? rows.map(lgRow).join('')
-    : '<tr class="lg-empty"><td colspan="8">No entries yet. Add one above, or type amounts on the Split page.</td></tr>';
+    : '<tr class="lg-empty"><td colspan="9">No entries yet. Add one above, or type amounts on the Split page.</td></tr>';
   ledgerTotals(rows);
   if (focus){
     const el = document.querySelector(`#page-ledger tr[data-id="${focus.id}"] ${focus.sel}`);
     if (el) el.focus();
   }
 }
+// paid back, added up for each pair of friends: [{from, to, amt}]
+function paidBackPairs(rows){
+  const m = new Map();
+  rows.filter(r => r.type === 'back').forEach(r => { const k = r.by + '>' + r.to[0]; m.set(k, (m.get(k) || 0) + toPaise(r.amt)); });
+  return [...m].filter(([, a]) => a).map(([k, amt]) => { const [from, to] = k.split('>').map(Number); return {from, to, amt}; });
+}
 function ledgerTotals(rows = ledgerRows()){
   const spent = rows.filter(r => r.type !== 'back').reduce((s, r) => s + toPaise(r.amt), 0);
-  const back = rows.filter(r => r.type === 'back').reduce((s, r) => s + toPaise(r.amt), 0);
-  $('lg-total').textContent = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'} · Total spent ${fmt(spent)} · Paid back ${fmt(back)}`;
+  const pairs = paidBackPairs(rows);
+  $('lg-total').innerHTML = `${rows.length} ${rows.length === 1 ? 'entry' : 'entries'} · Total spent ${fmt(spent)}` +
+    (pairs.length ? `<span class="pbk">Paid back: ${pairs.map(p => `${esc(nameOf(p.from))} → ${esc(nameOf(p.to))} ${fmt(p.amt)}`).join(' · ')}</span>` : '');
 }
+$('lg-sort').addEventListener('click', () => {
+  setOrder(ledgerRows().sort(byDate).map(r => r.id));
+  calc(); renderLedger();
+});
 const rowFrom = el => {
   const tr = el.closest('tr[data-id]'); if (!tr) return null;
   if (tr.dataset.id === 'new') return draft;
@@ -593,10 +612,14 @@ ledgerEl.addEventListener('change', e => {
   renderLedger({id: r.id, sel: '.' + cls});
 });
 ledgerEl.addEventListener('click', e => {
-  const tag = e.target.closest('.tag'), del = e.target.closest('.lg-del'), add = e.target.closest('.lg-add');
-  if (!tag && !del && !add) return;
+  const tag = e.target.closest('.tag'), del = e.target.closest('.lg-del'), add = e.target.closest('.lg-add'), clr = e.target.closest('.lg-clr');
+  if (!tag && !del && !add && !clr) return;
   const r = rowFrom(e.target); if (!r) return;
-  if (tag){
+  if (clr){
+    r[clr.dataset.f] = '';
+    if (r !== draft){ saveRow(r); calc(); }
+    renderLedger({id: r.id, sel: '.lg-' + clr.dataset.f});
+  } else if (tag){
     const q = +tag.dataset.q;
     if (r.to.includes(q)){ if (r.to.length === 1) return toast('At least one friend has to share this expense.'); r.to = r.to.filter(x => x !== q); }
     else r.to = [...r.to, q].sort((a, b) => a - b);
@@ -609,7 +632,7 @@ ledgerEl.addEventListener('click', e => {
 ledgerEl.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.closest('.lg-new') && e.target.matches('input')) addDraft(); });
 function addDraft(){
   if (!(toPaise(draft.amt) > 0)){ toast('Type an amount first.'); document.querySelector('.lg-new .lg-amt').focus(); return; }
-  saveRow({...draft, id: nextId++});
+  saveRow({...draft, id: nextId, ord: nextId}); nextId++;
   draft = newDraft(draft);
   calc(); renderLedger({id: 'new', sel: '.lg-amt'});
 }
@@ -726,7 +749,9 @@ function ledgerXlsx(rows){
     `<row r="1">${LG_HEAD.map((h, i) => str(1, i, h, 1)).join('')}</row>`,
     ...rows.map((r, k) => { const n = k + 2;
       return `<row r="${n}">${r.date ? num(n, 0, daySerial(r.date), 2) : str(n, 0, '')}${r.time ? num(n, 1, timeSerial(r.time).toFixed(10), 5) : str(n, 1, '')}${str(n, 2, r.type)}${str(n, 3, r.by)}${num(n, 4, (r.amt/100).toFixed(2), 3)}${str(n, 5, r.to)}${str(n, 6, r.why)}</row>`; }),
-    `<row r="${rows.length + 2}">${str(rows.length + 2, 3, 'Total spent', 1)}${num(rows.length + 2, 4, (total/100).toFixed(2), 4)}</row>`
+    `<row r="${rows.length + 2}">${str(rows.length + 2, 3, 'Total spent', 1)}${num(rows.length + 2, 4, (total/100).toFixed(2), 4)}</row>`,
+    ...paidBackPairs(ledgerRows()).map((p, k) => { const n = rows.length + 3 + k;
+      return `<row r="${n}">${str(n, 3, 'Paid back', 1)}${num(n, 4, (p.amt/100).toFixed(2), 4)}${str(n, 5, nameOf(p.from) + ' → ' + nameOf(p.to))}</row>`; })
   ].join('');
   const widths = [12, 8, 12, 16, 14, 28, 36];
   return zipStore([
@@ -745,7 +770,9 @@ async function renderLedgerPicture(rows){
   const bx = pad + 26, bw = inner - 52, rowH = 38, headH = 40, pillH = 38;
   const COLS_LG = [['Date', .15], ['Time', .08], ['Type', .12], ['Paid by', .14], ['Amount', .13, 'right'], ['For / to', .18], ['Note', .20]];
   const tableH = headH + rows.length * rowH;
-  const panelH = 22 + pillH + 18 + tableH + 16 + 40 + 24;
+  const spent = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
+  const pairs = paidBackPairs(ledgerRows()), footH = 40 + 24 * pairs.length;
+  const panelH = 22 + pillH + 18 + tableH + 16 + footH + 24;
   const H = 88 + gap + panelH + gap + 52;
   const c = document.createElement('canvas');
   c.width = W*S; c.height = H*S;
@@ -780,11 +807,10 @@ async function renderLedgerPicture(rows){
       txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 2 && r.type === 'Paid back' ? '#2f7a3a' : INK);
     });
   });
-  const spent = rows.filter(r => r.type !== 'Paid back').reduce((s, r) => s + r.amt, 0);
-  const back = rows.filter(r => r.type === 'Paid back').reduce((s, r) => s + r.amt, 0);
   const fy = ty + tableH + 8 + 16;
-  box(ctx, bx, fy, bw, 40, '#f5c542', 'M');
-  txt(ctx, `${rows.length} ${rows.length === 1 ? 'ENTRY' : 'ENTRIES'}  ·  TOTAL SPENT ${fmt(spent)}  ·  PAID BACK ${fmt(back)}`, bx + 16, fy + 21, 13, 'left', bw - 32);
+  box(ctx, bx, fy, bw, footH, '#f5c542', 'M');
+  txt(ctx, `${rows.length} ${rows.length === 1 ? 'ENTRY' : 'ENTRIES'}  ·  TOTAL SPENT ${fmt(spent)}`, bx + 16, fy + 21, 13, 'left', bw - 32);
+  pairs.forEach((p, k) => txt(ctx, `PAID BACK  ${nameOf(p.from)} → ${nameOf(p.to)}  ${fmt(p.amt)}`, bx + 16, fy + 21 + 24*(k+1), 13, 'left', bw - 32));
 
   ctx.fillStyle = '#e8808f'; ctx.fillRect(0, H-52, W, 52);
   ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
@@ -1069,7 +1095,10 @@ function reorderPeople(order){                      // order = old indices in th
   draft = null;
 }
 function finishMove(list){
-  if (list === colsEl){
+  if (list === $('lg-body')){
+    setOrder([...list.children].map(tr => +tr.dataset.id));
+    calc(); renderLedger();
+  } else if (list === colsEl){
     const order = [...colsEl.children].map(el => +el.dataset.p);
     if (order.some((v, i) => v !== i)){ reorderPeople(order); build(); }
   } else {
@@ -1093,7 +1122,7 @@ let drag = null;        // {el, list, id}
 document.addEventListener('pointerdown', e => {
   const h = e.target.closest('.grip');
   if (!h || e.button !== 0) return;
-  const el = h.closest('.friend, [data-panel]');
+  const el = h.closest('.friend, [data-panel], #lg-body > tr');
   drag = {el, list: el.parentElement, id: e.pointerId};
   el.classList.add('dragging'); document.body.classList.add('is-dragging');
   h.setPointerCapture(e.pointerId);
@@ -1118,13 +1147,14 @@ document.addEventListener('keydown', e => {
   const h = e.target.closest && e.target.closest('.grip');
   if (!h || !['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) return;
   e.preventDefault();
-  const el = h.closest('.friend, [data-panel]'), list = el.parentElement, back = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+  const el = h.closest('.friend, [data-panel], #lg-body > tr'), list = el.parentElement, back = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
   const sib = back ? el.previousElementSibling : el.nextElementSibling;
   if (!sib) return;
   list.insertBefore(el, back ? sib : sib.nextSibling);
-  const key = el.dataset.panel || null, pos = [...list.children].indexOf(el);
+  const key = el.dataset.panel || null, row = el.dataset.id || null, pos = [...list.children].indexOf(el);
   finishMove(list);
-  const again = key ? boardEl.querySelector(`[data-panel="${key}"] > .grip`) : colsEl.children[pos].querySelector('.grip');
+  const again = key ? boardEl.querySelector(`[data-panel="${key}"] > .grip`)
+              : row ? $('lg-body').querySelector(`tr[data-id="${row}"] .grip`) : colsEl.children[pos].querySelector('.grip');
   if (again) again.focus();
 });
 
