@@ -276,6 +276,18 @@ async function doCopyLink(url){
   }
 }
 
+/* ---------- look: playful (pixel art) or formal. Saved in this browser only, never in the share link ---------- */
+const LOOK_KEY = 'sdm-look';
+let siteLook = document.documentElement.classList.contains('formal') ? 'formal' : 'fun';
+function setLook(v){
+  siteLook = v;
+  document.documentElement.classList.toggle('formal', v === 'formal');
+  $('look').checked = v === 'formal';
+  try { localStorage.setItem(LOOK_KEY, v); } catch(e){}
+}
+$('look').checked = siteLook === 'formal';
+$('look').addEventListener('change', e => setLook(e.target.checked ? 'formal' : 'fun'));
+
 /* ---------- preview before copying / downloading ---------- */
 // what the open preview will copy / download: {kind, code, url} for a link, else {kind, file, name} plus
 // a picture to show (blob, url) or a table to show (html)
@@ -285,12 +297,15 @@ const PV_TEXT = {
   'lg-png': ['Preview ledger picture', 'Download'], 'lg-pdf': ['Preview ledger PDF', 'Download PDF'],
   csv: ['Preview ledger CSV', 'Download CSV'], xlsx: ['Preview ledger Excel file', 'Download Excel']
 };
+const STYLED = ['png', 'pdf', 'lg-png', 'lg-pdf', 'xlsx'];   // exports that can be drawn playful or formal
 function showPreview(kind, data){
   closePreview();
   const isLink = kind === 'link';
   pv = isLink ? {kind, code: data, url: ''} : {kind, ...data, url: data.blob ? URL.createObjectURL(data.blob) : ''};
   [$('pv-title').textContent, $('pv-go').textContent] = PV_TEXT[kind];
   $('pv-go').disabled = false;
+  $('pv-look').hidden = !STYLED.includes(kind);
+  document.querySelectorAll('#pv-look input').forEach(r => r.checked = r.value === pv.style);
   $('pv-link').hidden = !isLink;
   $('pv-img').hidden = !pv.blob;
   $('pv-table').hidden = !pv.html;
@@ -328,6 +343,7 @@ $('pv-custom').addEventListener('input', e => {
 function closePreview(){
   if (pv && pv.blob) URL.revokeObjectURL(pv.url);
   pv = null;
+  $('pv-img').classList.remove('busy');
   $('pv-pic').removeAttribute('src');
   if ($('pv').open) $('pv').close();
 }
@@ -336,6 +352,19 @@ $('pv-go').addEventListener('click', async () => {
   if (cur.kind === 'link'){ if (!cur.url) return; await doCopyLink(cur.url); }
   else downloadBlob(cur.file, cur.name);
   closePreview();
+});
+// switching the style redraws the open preview in place
+let lookRun = 0;
+$('pv-look').addEventListener('change', async e => {
+  const cur = pv, run = ++lookRun, style = e.target.value;
+  if (!cur || !STYLED.includes(cur.kind)) return;
+  $('pv-go').disabled = true; $('pv-img').classList.add('busy');
+  const d = await buildExport(cur.kind, style);
+  if (pv !== cur || run !== lookRun) return;            // closed, or switched again meanwhile
+  $('pv-go').disabled = false; $('pv-img').classList.remove('busy');
+  if (cur.blob) URL.revokeObjectURL(cur.url);
+  Object.assign(cur, d, {style, url: d.blob ? URL.createObjectURL(d.blob) : ''});
+  if (cur.blob) $('pv-pic').src = cur.url;
 });
 $('pv-close').addEventListener('click', closePreview);
 $('pv').addEventListener('close', () => { if (pv) closePreview(); });   // Esc key
@@ -447,8 +476,7 @@ menuEl.addEventListener('click', e => {
   openMenu(false);
   const x = b.dataset.x;
   if (x === 'settings'){ drawExportSettings(); $('xs').showModal(); }
-  else if (x === 'png' || x === 'pdf') exportPicture(x);
-  else exportLedger(x);
+  else startExport(x);
 });
 
 /* ---------- pages: Split and Ledger share the same data ---------- */
@@ -638,7 +666,20 @@ function addDraft(){
 }
 
 /* ---------- export as picture (drawn on a canvas, works offline) ---------- */
-const INK = '#2b2118';
+// two looks: 'fun' = pixel art like the page, 'formal' = plain sans-serif with thin rounded borders
+const LOOKS = {
+  fun: {pixel: true, upper: true, star: '★ ', font: '"Space Mono","Courier New",monospace', bold: 700,
+        ink: '#2b2118', sub: '#6b5d4a', line: '#2b2118', bg: '#f5e6bc', bar: '#f2bf5e', foot: '#e8808f', footInk: '#2b2118',
+        yellow: '#f5c542', cyan: '#3cc4cf', sage: '#c9e0a6', peach: '#f6c878', cream: '#fff7e0', zebra: '#f7ebc6',
+        green: '#8fdc7a', red: '#e2503a', back: '#2f7a3a', cards: ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'], xlHead: 'FF3CC4CF'},
+  formal: {pixel: false, upper: false, star: '', font: '"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif', bold: 600,
+        ink: '#1f2933', sub: '#5f6b7a', line: '#d0d5dd', bg: '#f4f5f7', bar: '#ffffff', foot: '#ffffff', footInk: '#5f6b7a',
+        yellow: '#eef2f7', cyan: '#e3e9f1', sage: '#ffffff', peach: '#ffffff', cream: '#ffffff', zebra: '#f7f8fa',
+        green: '#d7eedd', red: '#b42318', back: '#2f7a3a', cards: ['#f9fafb','#f9fafb','#f9fafb','#f9fafb'], xlHead: 'FFE3E9F1'}
+};
+let lk = LOOKS.fun;      // the look being drawn right now
+const U = s => lk.upper ? s.toUpperCase() : s;
+const font = size => `${lk.bold} ${size}px ${lk.font}`;
 function corner(n, s){
   const c = n*s, L = [];
   for (let k = 0; k < n; k++) L.push([-c+k*s, k*s], [-c+k*s, (k+1)*s]);
@@ -660,8 +701,14 @@ function fillPoly(ctx, pts, color){
 }
 // same shapes as the page: 'L' = 4px border / 12px corners, 'M' = 2px border / 8px corners
 function box(ctx, x, y, w, h, fill, kind){
+  if (!lk.pixel){                                   // formal: 1px grey border, rounded corners
+    const r = kind === 'M' ? 6 : 10;
+    ctx.fillStyle = lk.line; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+    ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x+1, y+1, w-2, h-2, r-1); ctx.fill();
+    return;
+  }
   const b = kind === 'M' ? 2 : 4, n = kind === 'M' ? 4 : 3;
-  fillPoly(ctx, poly(x, y, w, h, b, n), INK);
+  fillPoly(ctx, poly(x, y, w, h, b, n), lk.ink);
   fillPoly(ctx, poly(x+b, y+b, w-2*b, h-2*b, b, n-1), fill);
   ctx.fillStyle = 'rgba(0,0,0,.10)';
   ctx.fillRect(x + b*(n), y + h - 2*b, w - 2*b*n, b);
@@ -672,18 +719,51 @@ function fit(ctx, text, maxW){
   return text + '…';
 }
 function txt(ctx, text, x, y, size, align, maxW, color){
-  ctx.font = `700 ${size}px "Space Mono","Courier New",monospace`;
-  ctx.fillStyle = color || INK; ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
+  ctx.font = font(size);
+  ctx.fillStyle = color || lk.ink; ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(maxW ? fit(ctx, text, maxW) : text, x, y);
 }
+// section title: a blue pixel pill, or a plain heading when formal (both 38px tall)
+function pill(ctx, label, x, y){
+  if (!lk.pixel) return txt(ctx, label, x, y + 19, 18);
+  ctx.font = font(15);
+  box(ctx, x, y, ctx.measureText(label).width + 36, 38, lk.cyan, 'L');
+  txt(ctx, label, x + 18, y + 20, 15);
+}
+// page background, 88px header with the title and date, 52px footer
+function frame(ctx, W, H, pad){
+  const rule = lk.pixel ? 4 : 1;
+  ctx.fillStyle = lk.bg; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = lk.bar; ctx.fillRect(0, 0, W, 88);
+  ctx.fillStyle = lk.line; ctx.fillRect(0, 88 - rule, W, rule);
+  txt(ctx, lk.star + U('Split-da-money'), pad, 44, W < 700 ? 24 : 30);
+  txt(ctx, new Date().toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'}), W-pad, 44, 15, 'right', 0, lk.pixel ? lk.ink : lk.sub);
+  ctx.fillStyle = lk.foot; ctx.fillRect(0, H-52, W, 52);
+  ctx.fillStyle = lk.line; ctx.fillRect(0, H-52, W, rule);
+  txt(ctx, U('Split-da-money'), W/2, H-24, 13, 'center', 0, lk.footInk);
+}
 
-async function exportPicture(kind){
-  if (!last || !last.active) return;
-  const c = await renderPicture();
-  const blob = await canvasBlob(c, 'image/png');
-  const file = kind === 'pdf' ? await canvasPdf(c) : blob;
-  const name = 'split-da-money.' + kind;
-  showPreview(kind, {blob, file, name});
+// open the preview of an export, drawn in the page's current look (the preview can switch it)
+async function startExport(x){
+  if ((x === 'png' || x === 'pdf') ? !last || !last.active : !ledgerRows().length) return;
+  const style = siteLook;
+  showPreview(x, {...await buildExport(x, style), style});
+}
+// what an export contains: {file, name} plus a picture (blob) or a table (html) to preview
+async function buildExport(x, style){
+  if (x === 'png' || x === 'pdf'){
+    const c = await renderPicture(style), blob = await canvasBlob(c, 'image/png');
+    return {blob, file: x === 'pdf' ? await canvasPdf(c) : blob, name: 'split-da-money.' + x};
+  }
+  const rows = ledgerTable();
+  if (x === 'lg-png' || x === 'lg-pdf'){
+    const c = await renderLedgerPicture(rows, style), blob = await canvasBlob(c, 'image/png');
+    return {blob, file: x === 'lg-pdf' ? await canvasPdf(c) : blob, name: 'split-da-money-ledger.' + x.slice(3)};
+  }
+  const html = `<table class="ledger plain"><thead><tr>${LG_HEAD.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td class="num">${(r.amt/100).toFixed(2)}</td><td>${esc(r.to)}</td><td>${esc(r.why)}</td></tr>`).join('')
+  }</tbody></table>`;
+  return {html, file: x === 'csv' ? ledgerCsv(rows) : ledgerXlsx(rows, style), name: 'split-da-money-ledger.' + x};
 }
 function downloadBlob(blob, name){
   const a = document.createElement('a');
@@ -698,19 +778,6 @@ function ledgerTable(){
   return ledgerRows().map(r => ({date: r.date, time: r.time, type: typeName(r.type), by: nameOf(r.by), amt: toPaise(r.amt), to: forText(r), why: r.why.trim()}));
 }
 const LG_HEAD = ['Date', 'Time', 'Type', 'Paid by', 'Amount (₹)', 'For / to', 'Note'];
-async function exportLedger(x){
-  const rows = ledgerTable(); if (!rows.length) return;
-  if (x === 'lg-png' || x === 'lg-pdf'){
-    const c = await renderLedgerPicture(rows);
-    const blob = await canvasBlob(c, 'image/png');
-    return showPreview(x, {blob, file: x === 'lg-pdf' ? await canvasPdf(c) : blob, name: 'split-da-money-ledger.' + x.slice(3)});
-  }
-  const html = `<table class="ledger plain"><thead><tr>${LG_HEAD.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${
-    rows.map(r => `<tr><td>${esc(r.date)}</td><td>${esc(r.time)}</td><td>${esc(r.type)}</td><td>${esc(r.by)}</td><td class="num">${(r.amt/100).toFixed(2)}</td><td>${esc(r.to)}</td><td>${esc(r.why)}</td></tr>`).join('')
-  }</tbody></table>`;
-  const file = x === 'csv' ? ledgerCsv(rows) : ledgerXlsx(rows);
-  showPreview(x, {html, file, name: 'split-da-money-ledger.' + x});
-}
 function ledgerCsv(rows){
   const cell = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   const lines = [LG_HEAD, ...rows.map(r => [r.date, r.time, r.type, r.by, (r.amt/100).toFixed(2), r.to, r.why])].map(l => l.map(v => cell(String(v))).join(','));
@@ -736,7 +803,8 @@ function zipStore(files){
   parts.push(le(0x06054b50,4), le(0,2), le(0,2), le(files.length,2), le(files.length,2), le(cdLen,4), le(cdStart,4), le(0,2));
   return new Blob(parts, {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
-function ledgerXlsx(rows){
+function ledgerXlsx(rows, style){
+  const head = (LOOKS[style] || LOOKS.fun).xlHead;      // header row fill
   const x = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const col = i => String.fromCharCode(65 + i);
   const str = (r, i, v, st) => `<c r="${col(i)}${r}" t="inlineStr"${st ? ` s="${st}"` : ''}><is><t xml:space="preserve">${x(v)}</t></is></c>`;
@@ -759,12 +827,13 @@ function ledgerXlsx(rows){
     ['_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],
     ['xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Ledger" sheetId="1" r:id="rId1"/></sheets></workbook>'],
     ['xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'],
-    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="&quot;₹&quot;#,##0.00"/><numFmt numFmtId="166" formatCode="hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF3CC4CF"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
+    ['xl/styles.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="3"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="&quot;₹&quot;#,##0.00"/><numFmt numFmtId="166" formatCode="hh:mm"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="' + head + '"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/><xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>'],
     ['xl/worksheets/sheet1.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths.map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${body}</sheetData></worksheet>`]
   ]);
 }
 
-async function renderLedgerPicture(rows){
+async function renderLedgerPicture(rows, style){
+  lk = LOOKS[style] || LOOKS.fun;
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
   const W = xo.width === 'wide' ? 1200 : 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
   const bx = pad + 26, bw = inner - 52, rowH = 38, headH = 40, pillH = 38;
@@ -777,44 +846,34 @@ async function renderLedgerPicture(rows){
   const c = document.createElement('canvas');
   c.width = W*S; c.height = H*S;
   const ctx = c.getContext('2d'); ctx.scale(S, S);
-  ctx.fillStyle = '#f5e6bc'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#f2bf5e'; ctx.fillRect(0, 0, W, 88);
-  ctx.fillStyle = INK; ctx.fillRect(0, 84, W, 4);
-  txt(ctx, '★ SPLIT-DA-MONEY', pad, 44, 30);
-  txt(ctx, new Date().toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'}), W-pad, 44, 15, 'right');
+  frame(ctx, W, H, pad);
 
   let y = 88 + gap;
-  box(ctx, pad, y, inner, panelH, '#c9e0a6', 'L');
-  ctx.font = '700 15px "Space Mono","Courier New",monospace';
-  box(ctx, bx, y + 22, ctx.measureText('LEDGER').width + 36, pillH, '#3cc4cf', 'L');
-  txt(ctx, 'LEDGER', bx + 18, y + 22 + pillH/2 + 1, 15);
+  box(ctx, pad, y, inner, panelH, lk.sage, 'L');
+  pill(ctx, U('Ledger'), bx, y + 22);
   const ty = y + 22 + pillH + 18;
-  box(ctx, bx, ty, bw, tableH + 8, '#fff7e0', 'M');
+  box(ctx, bx, ty, bw, tableH + 8, lk.cream, 'M');
   const cx = []; let acc = bx + 4;
   COLS_LG.forEach(([, f]) => { cx.push(acc); acc += (bw - 8) * f; });
-  ctx.fillStyle = '#3cc4cf'; ctx.fillRect(bx + 4, ty + 4, bw - 8, headH);
-  ctx.fillStyle = INK; ctx.fillRect(bx + 4, ty + 4 + headH - 2, bw - 8, 2);
+  ctx.fillStyle = lk.cyan; ctx.fillRect(bx + 4, ty + 4, bw - 8, headH);
+  ctx.fillStyle = lk.line; ctx.fillRect(bx + 4, ty + 4 + headH - 2, bw - 8, 2);
   COLS_LG.forEach(([h, f, al], i) => {
     const w = (bw - 8) * f;
-    txt(ctx, h.toUpperCase(), al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ty + 4 + headH/2, 12, al, w - 20);
+    txt(ctx, U(h), al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ty + 4 + headH/2, 12, al, w - 20);
   });
   rows.forEach((r, k) => {
     const ry = ty + 4 + headH + k * rowH;
-    if (k % 2){ ctx.fillStyle = '#f7ebc6'; ctx.fillRect(bx + 4, ry, bw - 8, rowH); }
+    if (k % 2){ ctx.fillStyle = lk.zebra; ctx.fillRect(bx + 4, ry, bw - 8, rowH); }
     const vals = [fmtDate(r.date) || '—', r.time || '—', r.type, r.by, fmt(r.amt), r.to, r.why || '—'];
     vals.forEach((v, i) => {
       const [, f, al] = COLS_LG[i], w = (bw - 8) * f;
-      txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 2 && r.type === 'Paid back' ? '#2f7a3a' : INK);
+      txt(ctx, v, al === 'right' ? cx[i] + w - 12 : cx[i] + 12, ry + rowH/2 + 1, 13, al, w - 20, i === 2 && r.type === 'Paid back' ? lk.back : lk.ink);
     });
   });
   const fy = ty + tableH + 8 + 16;
-  box(ctx, bx, fy, bw, footH, '#f5c542', 'M');
-  txt(ctx, `${rows.length} ${rows.length === 1 ? 'ENTRY' : 'ENTRIES'}  ·  TOTAL SPENT ${fmt(spent)}`, bx + 16, fy + 21, 13, 'left', bw - 32);
-  pairs.forEach((p, k) => txt(ctx, `PAID BACK  ${nameOf(p.from)} → ${nameOf(p.to)}  ${fmt(p.amt)}`, bx + 16, fy + 21 + 24*(k+1), 13, 'left', bw - 32));
-
-  ctx.fillStyle = '#e8808f'; ctx.fillRect(0, H-52, W, 52);
-  ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
-  txt(ctx, 'SPLIT-DA-MONEY', W/2, H-24, 13, 'center');
+  box(ctx, bx, fy, bw, footH, lk.yellow, 'M');
+  txt(ctx, U(`${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}  ·  Total spent ${fmt(spent)}`), bx + 16, fy + 21, 13, 'left', bw - 32);
+  pairs.forEach((p, k) => txt(ctx, `${U('Paid back')}  ${nameOf(p.from)} → ${nameOf(p.to)}  ${fmt(p.amt)}`, bx + 16, fy + 21 + 24*(k+1), 13, 'left', bw - 32));
   return c;
 }
 
@@ -875,10 +934,10 @@ $('xs').addEventListener('change', e => {
   saveExport(); drawExportSettings();
 });
 
-async function renderPicture(){
+async function renderPicture(style){
+  lk = LOOKS[style] || LOOKS.fun;
   try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
   const {n, paid, total, share, uneven, bal, out} = last;
-  const COLORS = ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'];
 
   // what each person paid (only lines with an amount)
   const blocks = people.slice(0, n).map((p, i) => ({
@@ -914,40 +973,25 @@ async function renderPicture(){
   c.width = W*S; c.height = H*S;
   const ctx = c.getContext('2d');
   ctx.scale(S, S);
-
-  // page background
-  ctx.fillStyle = '#f5e6bc'; ctx.fillRect(0, 0, W, H);
-
-  // header
-  ctx.fillStyle = '#f2bf5e'; ctx.fillRect(0, 0, W, 88);
-  ctx.fillStyle = INK; ctx.fillRect(0, 84, W, 4);
-  txt(ctx, '★ SPLIT-DA-MONEY', pad, 44, W < 700 ? 24 : 30);
-  txt(ctx, new Date().toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}), W-pad, 44, 15, 'right');
-
-  const pill = (label, py, color) => {
-    ctx.font = '700 15px "Space Mono","Courier New",monospace';
-    const w = ctx.measureText(label).width + 36;
-    box(ctx, pad+26, py, w, pillH, color, 'L');
-    txt(ctx, label, pad+26+18, py+pillH/2+1, 15);
-  };
+  frame(ctx, W, H, pad);
 
   const draw = {
     summary(y){
-      box(ctx, pad, y, inner, 88, '#f5c542', 'L');
+      box(ctx, pad, y, inner, 88, lk.yellow, 'L');
       const big = W < 700 ? 22 : 26;
-      txt(ctx, 'TOTAL SPENT', pad+30, y+32, 13);
+      txt(ctx, U('Total spent'), pad+30, y+32, 13);
       txt(ctx, fmt(total), pad+30, y+60, big, 'left', inner/2 - 40);
       if (uneven){
-        txt(ctx, 'FAIR SHARES', W/2+10, y+32, 13);
+        txt(ctx, U('Fair shares'), W/2+10, y+32, 13);
         txt(ctx, 'Differ per friend', W/2+10, y+60, W < 700 ? 15 : 18, 'left', inner/2 - 40);
       } else {
-        txt(ctx, 'EACH FRIEND SHOULD PAY', W/2+10, y+32, 13, 'left', inner/2 - 40);
+        txt(ctx, U('Each friend should pay'), W/2+10, y+32, 13, 'left', inner/2 - 40);
         txt(ctx, fmt(Math.round(total / n)), W/2+10, y+60, big, 'left', inner/2 - 40);
       }
     },
     paid(y){
-      box(ctx, pad, y, inner, expH, '#c9e0a6', 'L');
-      pill('WHO PAID WHAT', y + panelTop, '#3cc4cf');
+      box(ctx, pad, y, inner, expH, lk.sage, 'L');
+      pill(ctx, U('Who paid what'), bx, y + panelTop);
       let by = y + panelTop + pillH + 18;
       grid.forEach((line, li) => {
         line.forEach((b, ci) => drawBlock(b, bx + ci*(colW + cardGap), by, colW, lineH[li]));
@@ -955,63 +999,57 @@ async function renderPicture(){
       });
     },
     settle(y){
-      box(ctx, pad, y, inner, payH, '#f6c878', 'L');
-      pill('SETTLEMENT', y + panelTop, '#3cc4cf');
+      box(ctx, pad, y, inner, payH, lk.peach, 'L');
+      pill(ctx, U('Settlement'), bx, y + panelTop);
       let ry = y + panelTop + pillH + 18;
       if (!out.length){
-        box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
+        box(ctx, bx, ry, bw, rowH-8, lk.cream, 'M');
         txt(ctx, 'Everyone paid the same. Nothing to settle!', bx+18, ry+(rowH-8)/2+1, 15, 'left', bw-36);
       } else out.forEach(t => {
         const aw = Math.min(170, bw*0.3), ax = bx + bw - aw - 8;
-        box(ctx, bx, ry, bw, rowH-8, '#fff7e0', 'M');
+        box(ctx, bx, ry, bw, rowH-8, lk.cream, 'M');
         txt(ctx, `${nameOf(t.from)}  gives  ${nameOf(t.to)}`, bx+18, ry+(rowH-8)/2+1, 16, 'left', bw - aw - 40);
-        box(ctx, ax, ry+5, aw, rowH-18, '#f5c542', 'M');
+        box(ctx, ax, ry+5, aw, rowH-18, lk.yellow, 'M');
         txt(ctx, fmt(t.v), ax+aw/2, ry+(rowH-8)/2+1, 15, 'center', aw-12);
         ry += rowH;
       });
     }
   };
   function drawBlock(b, x, y, w, h){
-    box(ctx, x, y, w, h, COLORS[b.i % 4], 'M');
+    box(ctx, x, y, w, h, lk.cards[b.i % 4], 'M');
     const hy = y + 12 + 19;
-    const lab = b.bal > 0 ? 'GETS ' + fmt(b.bal) : b.bal < 0 ? 'PAYS ' + fmt(-b.bal) : 'ALL GOOD';
-    const col = b.bal > 0 ? '#8fdc7a' : b.bal < 0 ? '#e2503a' : '#fff7e0';
-    ctx.font = '700 13px "Space Mono","Courier New",monospace';
+    const lab = U(b.bal > 0 ? 'Gets ' + fmt(b.bal) : b.bal < 0 ? 'Pays ' + fmt(-b.bal) : 'All good');
+    const col = b.bal > 0 ? lk.green : b.bal < 0 ? lk.red : lk.cream;
+    ctx.font = font(13);
     const cw = compact ? Math.min(ctx.measureText(lab).width + 32, w - 40) : 200, cx = compact ? x + 20 : x + w - cw - 14;
-    const money = uneven ? 'PAID ' + fmt(b.paid) + ' · SHARE ' + fmt(b.share) : 'PAID ' + fmt(b.paid);
+    const money = U(uneven ? 'Paid ' + fmt(b.paid) + ' · Share ' + fmt(b.share) : 'Paid ' + fmt(b.paid));
     let cy = hy;                                     // middle of the GETS / PAYS chip
     if (compact){                                    // narrow card: name, chip, then the amounts, one per line
       cy = y + 12 + 34 + 17;
       txt(ctx, b.name, x+20, y + 12 + 17, 17, 'left', w - 40);
-      txt(ctx, 'PAID ' + fmt(b.paid), x+20, cy + 34, 13, 'left', w - 40);
-      if (uneven) txt(ctx, 'SHARE ' + fmt(b.share), x+20, cy + 56, 13, 'left', w - 40);
+      txt(ctx, U('Paid ') + fmt(b.paid), x+20, cy + 34, 13, 'left', w - 40);
+      if (uneven) txt(ctx, U('Share ') + fmt(b.share), x+20, cy + 56, 13, 'left', w - 40);
     } else {
       txt(ctx, b.name, x+20, hy, 17, 'left', w*0.30);
       txt(ctx, money, x+w*0.34, hy, 13, 'left', w*0.66 - cw - 40);
     }
     box(ctx, cx, cy - 16, cw, 32, col, 'M');
-    txt(ctx, lab, cx+cw/2, cy+1, 13, 'center', cw-16, b.bal < 0 ? '#ffffff' : INK);
+    txt(ctx, lab, cx+cw/2, cy+1, 13, 'center', cw-16, b.bal < 0 ? '#ffffff' : lk.ink);
     let ry = y + headH + 2;
     b.rows.forEach(r => {
       const cy = ry + 15, amt = fmt(r.amt);
-      ctx.font = '700 15px "Space Mono","Courier New",monospace';
+      ctx.font = font(15);
       const aw = ctx.measureText(amt).width;
-      ctx.fillStyle = INK; ctx.fillRect(x+22, cy-3, 6, 6);
+      ctx.fillStyle = lk.ink; ctx.fillRect(x+22, cy-3, 6, 6);
       txt(ctx, r.why, x+38, cy, 15, 'left', w - 38 - 20 - aw - 18);
       txt(ctx, amt, x+w-20, cy, 15, 'right');
-      if (r.note) txt(ctx, r.note, x+38, cy + 21, 12, 'left', w - 38 - 20, '#6b5d4a');
+      if (r.note) txt(ctx, r.note, x+38, cy + 21, 12, 'left', w - 38 - 20, lk.sub);
       ry += lineOf(r);
     });
   }
 
   let y = 88 + gap;
   shown.forEach(k => { draw[k](y); y += heights[k] + gap; });
-
-  // footer
-  ctx.fillStyle = '#e8808f'; ctx.fillRect(0, H-52, W, 52);
-  ctx.fillStyle = INK; ctx.fillRect(0, H-52, W, 4);
-  txt(ctx, 'SPLIT-DA-MONEY', W/2, H-24, 13, 'center');
-
   return c;
 }
 const canvasBlob = (c, type, q) => new Promise(res => c.toBlob(res, type, q));

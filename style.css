@@ -22,6 +22,7 @@ header.bar{background:var(--bar);border-bottom:4px solid var(--ink);padding:16px
            display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{margin:0;font-size:22px;text-transform:uppercase;letter-spacing:1px}
 h1 span{background:var(--cream);padding:0 6px}
+h1 .star{font-style:normal}
 main{max-width:1200px;margin:0 auto;padding:30px 16px 20px;overflow-x:clip;filter:drop-shadow(6px 6px 0 rgba(43,33,24,.32))}
 .panel{padding:calc(var(--b) + 18px)}
 .pill{display:inline-block;--fill:var(--cyan);padding:calc(var(--b) + 3px) 16px;margin-bottom:16px;font-size:14px;text-transform:uppercase}
@@ -65,6 +66,7 @@ a.btn[hidden]{display:none}
 select{width:100%;font:700 13px var(--font);color:var(--ink);background:transparent;border:0;padding:0;outline:none;cursor:pointer}
 .pic{--fill:#fffaf0;padding:calc(var(--b) + 8px)}
 .pic img{display:block;width:100%;height:auto;max-height:60vh;object-fit:contain}
+.pic.busy img{opacity:.4;transition:opacity .15s}
 .xs{width:min(520px,calc(100vw - 32px))}
 .xs .hint{margin:0}
 .xs-list{gap:8px}
@@ -221,3 +223,59 @@ table.plain{width:100%;border-collapse:collapse;font-size:12px}
 .dt .field{flex:1;min-width:0}
 .clr{width:22px;height:22px;padding:0;flex:none;display:flex;align-items:center;justify-content:center;--fill:var(--cream)}
 .clr svg{display:block;width:10px;height:10px}
+
+/* ---------- formal look: the header toggle puts .formal on <html> (saved in this browser only) ---------- */
+html.formal{
+  --ink:#1f2933;--bg:#f4f5f7;--card:#fff;--line:#d0d5dd;--accent:#1f3a5f;--sub:#5f6b7a;
+  --yellow:#eef2f7;--orange:#dbe4f0;--bar:#fff;--peach:#fff;--sage:#fff;--cyan:#e3e9f1;
+  --green:#d7eedd;--red:#b42318;--salmon:#f3e3e1;--cream:#fff;
+  --font:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+html.formal body{font-weight:400;line-height:1.5}
+/* thin grey border with rounded corners instead of the pixel stairs */
+html.formal .px{background:var(--line);border-radius:var(--r);clip-path:none}
+html.formal .px::before{clip-path:none;border-radius:calc(var(--r) - 1px);box-shadow:none}
+html.formal .L{--b:1px;--r:10px}
+html.formal .M{--b:1px;--r:6px}
+html.formal :is(h1,.pill,.btn,label,.tags span,.chip,.ledger th,.plain th,.menu-h){text-transform:none;letter-spacing:0}
+html.formal :is(.btn,select,.menu button,.chip){font-weight:500}
+html.formal input{font-weight:400}
+html.formal :is(label,.menu-h){color:var(--sub);font-weight:600}
+html.formal .toggle,html.formal .xs-check{color:var(--ink)}
+html.formal .btn:active{transform:none}
+
+html.formal header.bar{border-bottom:1px solid var(--line);padding:12px 20px}
+html.formal h1{font-size:20px;font-weight:600}
+html.formal h1 .star{display:none}
+html.formal h1 span{background:none;padding:0;color:var(--accent)}
+html.formal main{filter:none}
+html.formal .panel{box-shadow:0 1px 3px rgba(16,24,40,.06)}
+html.formal .pill{background:none;padding:0;font-size:17px;font-weight:600;margin-bottom:12px}
+html.formal .pill::before{display:none}
+html.formal .hint{color:var(--sub)}
+
+html.formal .btn.blue:not(:disabled),html.formal .tab[aria-selected="true"]{--fill:var(--accent);color:#fff}
+html.formal .btn.orange:not(:disabled){--fill:#fff}
+html.formal .seg .btn:has(input:checked){--fill:var(--accent);color:#fff}
+html.formal .field,html.formal .pic,html.formal .table-wrap{--fill:#fff}
+html.formal .field:focus-within{--fill:#fff;background:var(--accent)}
+html.formal :is(.friend,.friend.c1,.friend.c2,.friend.c3){--fill:#f9fafb}
+html.formal :is(.tag,.tag.c1,.tag.c2,.tag.c3){--fill:#eef2f7}
+html.formal .tag.off{--fill:#e5e7eb;color:#9aa3ae}
+html.formal .rm,html.formal .rmt,html.formal .rmf{--fill:#fff;color:var(--red)}
+html.formal .chip.pays{color:#fff}
+html.formal .who,html.formal .amt{border-radius:4px}
+
+html.formal .menu,html.formal .toast{filter:drop-shadow(0 4px 10px rgba(16,24,40,.12))}
+html.formal .menu button{border-radius:4px}
+html.formal .menu-h{border-top:1px solid var(--line)}
+html.formal .menu-h:first-child{border:0}
+html.formal .preview::backdrop{background:rgba(16,24,40,.45)}
+
+html.formal .ledger th,html.formal .plain th{border-bottom:1px solid var(--line);font-weight:600}
+html.formal .ledger td{border-bottom:1px solid #eaecf0}
+html.formal .plain td{border-bottom:1px solid #eaecf0}
+html.formal .ledger tbody#lg-body tr:nth-child(even) td{background:#f9fafb}
+html.formal .ledger tr.lg-new td{background:#f3f6fa;border-bottom:1px solid var(--line)}
+html.formal .ledger tr.dragging td{background:#eef2f7}
+html.formal .dragging{outline:2px dashed var(--accent)}
