@@ -666,16 +666,16 @@ function addDraft(){
 }
 
 /* ---------- export as picture (drawn on a canvas, works offline) ---------- */
-// two looks: 'fun' = pixel art like the page, 'formal' = plain sans-serif with thin rounded borders
+// two looks: 'fun' = pixel art like the page, 'formal' = clean sans-serif with soft rounded cards
 const LOOKS = {
   fun: {pixel: true, upper: true, star: '★ ', font: '"Space Mono","Courier New",monospace', bold: 700,
         ink: '#2b2118', sub: '#6b5d4a', line: '#2b2118', bg: '#f5e6bc', bar: '#f2bf5e', foot: '#e8808f', footInk: '#2b2118',
         yellow: '#f5c542', cyan: '#3cc4cf', sage: '#c9e0a6', peach: '#f6c878', cream: '#fff7e0', zebra: '#f7ebc6',
-        green: '#8fdc7a', red: '#e2503a', back: '#2f7a3a', cards: ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'], xlHead: 'FF3CC4CF'},
-  formal: {pixel: false, upper: false, star: '', font: '"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif', bold: 600,
-        ink: '#1f2933', sub: '#5f6b7a', line: '#d0d5dd', bg: '#f4f5f7', bar: '#ffffff', foot: '#ffffff', footInk: '#5f6b7a',
-        yellow: '#eef2f7', cyan: '#e3e9f1', sage: '#ffffff', peach: '#ffffff', cream: '#ffffff', zebra: '#f7f8fa',
-        green: '#d7eedd', red: '#b42318', back: '#2f7a3a', cards: ['#f9fafb','#f9fafb','#f9fafb','#f9fafb'], xlHead: 'FFE3E9F1'}
+        green: '#8fdc7a', red: '#e2503a', gInk: '#2b2118', rInk: '#ffffff', back: '#2f7a3a', cards: ['#f8dc8f','#c3e8ec','#f6c9b6','#e6efc9'], xlHead: 'FF3CC4CF'},
+  formal: {pixel: false, upper: false, star: '', font: '"Inter","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif', bold: 600,
+        ink: '#101828', sub: '#667085', line: '#e4e7ec', bg: '#f6f7f9', bar: '#ffffff', foot: '#ffffff', footInk: '#98a2b3', accent: '#4f46e5',
+        yellow: '#eef2ff', cyan: '#f9fafb', sage: '#ffffff', peach: '#ffffff', cream: '#ffffff', zebra: '#f9fafb',
+        green: '#ecfdf3', red: '#fef3f2', gInk: '#067647', rInk: '#b42318', back: '#067647', cards: ['#f9fafb','#f9fafb','#f9fafb','#f9fafb'], xlHead: 'FFF2F4F7'}
 };
 let lk = LOOKS.fun;      // the look being drawn right now
 const U = s => lk.upper ? s.toUpperCase() : s;
@@ -701,9 +701,12 @@ function fillPoly(ctx, pts, color){
 }
 // same shapes as the page: 'L' = 4px border / 12px corners, 'M' = 2px border / 8px corners
 function box(ctx, x, y, w, h, fill, kind){
-  if (!lk.pixel){                                   // formal: 1px grey border, rounded corners
-    const r = kind === 'M' ? 6 : 10;
+  if (!lk.pixel){                                   // formal: 1px grey border, rounded corners, soft shadow on big cards
+    const r = kind === 'M' ? 8 : 16;
+    ctx.save();
+    if (kind !== 'M'){ ctx.shadowColor = 'rgba(16,24,40,.08)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
     ctx.fillStyle = lk.line; ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill();
+    ctx.restore();
     ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x+1, y+1, w-2, h-2, r-1); ctx.fill();
     return;
   }
@@ -736,7 +739,13 @@ function frame(ctx, W, H, pad){
   ctx.fillStyle = lk.bg; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = lk.bar; ctx.fillRect(0, 0, W, 88);
   ctx.fillStyle = lk.line; ctx.fillRect(0, 88 - rule, W, rule);
-  txt(ctx, lk.star + U('Split-da-money'), pad, 44, W < 700 ? 24 : 30);
+  let tx = pad;
+  if (lk.accent){                                   // formal: a small rupee logo before the title
+    ctx.fillStyle = lk.accent; ctx.beginPath(); ctx.roundRect(pad, 27, 34, 34, 10); ctx.fill();
+    txt(ctx, '₹', pad + 17, 45, 19, 'center', 0, '#ffffff');
+    tx += 46;
+  }
+  txt(ctx, lk.star + U('Split-da-money'), tx, 44, W < 700 ? 24 : lk.pixel ? 30 : 28);
   txt(ctx, new Date().toLocaleDateString(undefined, {day:'numeric', month:'short', year:'numeric'}), W-pad, 44, 15, 'right', 0, lk.pixel ? lk.ink : lk.sub);
   ctx.fillStyle = lk.foot; ctx.fillRect(0, H-52, W, 52);
   ctx.fillStyle = lk.line; ctx.fillRect(0, H-52, W, rule);
@@ -834,7 +843,7 @@ function ledgerXlsx(rows, style){
 
 async function renderLedgerPicture(rows, style){
   lk = LOOKS[style] || LOOKS.fun;
-  try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
+  try { await document.fonts.load(font(16)); } catch(e){}
   const W = xo.width === 'wide' ? 1200 : 900, pad = 28, S = 2, inner = W - 2*pad, gap = 28;
   const bx = pad + 26, bw = inner - 52, rowH = 38, headH = 40, pillH = 38;
   const COLS_LG = [['Date', .15], ['Time', .08], ['Type', .12], ['Paid by', .14], ['Amount', .13, 'right'], ['For / to', .18], ['Note', .20]];
@@ -936,7 +945,7 @@ $('xs').addEventListener('change', e => {
 
 async function renderPicture(style){
   lk = LOOKS[style] || LOOKS.fun;
-  try { await document.fonts.load('700 16px "Space Mono"'); } catch(e){}
+  try { await document.fonts.load(font(16)); } catch(e){}
   const {n, paid, total, share, uneven, bal, out} = last;
 
   // what each person paid (only lines with an amount)
@@ -1034,7 +1043,7 @@ async function renderPicture(style){
       txt(ctx, money, x+w*0.34, hy, 13, 'left', w*0.66 - cw - 40);
     }
     box(ctx, cx, cy - 16, cw, 32, col, 'M');
-    txt(ctx, lab, cx+cw/2, cy+1, 13, 'center', cw-16, b.bal < 0 ? '#ffffff' : lk.ink);
+    txt(ctx, lab, cx+cw/2, cy+1, 13, 'center', cw-16, b.bal > 0 ? lk.gInk : b.bal < 0 ? lk.rInk : lk.ink);
     let ry = y + headH + 2;
     b.rows.forEach(r => {
       const cy = ry + 15, amt = fmt(r.amt);
