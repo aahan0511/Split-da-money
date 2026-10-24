@@ -6,20 +6,18 @@
 <title>Split-da-money</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261024a">
-<script>try { if (localStorage.getItem('sdm-look') === 'formal') document.documentElement.classList.add('formal'); } catch(e){}</script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=20261018e">
 </head>
 <body>
 
 <header class="bar">
-  <h1><i class="star" aria-hidden="true">&#9733; </i><span>Split</span>-da-money</h1>
+  <h1>&#9733; <span>Split</span>-da-money</h1>
   <nav class="tabs" role="tablist" aria-label="Pages">
     <button class="px M btn tab" type="button" role="tab" data-tab="split" aria-selected="true">Split</button>
     <button class="px M btn tab" type="button" role="tab" data-tab="ledger" aria-selected="false">Ledger</button>
   </nav>
   <div class="tools">
-    <label class="px M toggle" title="Plain, formal look (saved in this browser only)"><input id="look" type="checkbox"> Formal</label>
     <button id="link" class="px L btn orange" type="button">Copy link</button>
     <div class="menu-wrap" id="export-wrap">
       <button id="export-menu" class="px L btn blue" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="export-list">Export <span class="caret"></span></button>
@@ -101,13 +99,6 @@
 
 <dialog id="pv" class="px L preview" aria-labelledby="pv-title">
   <div class="px L pill" id="pv-title">Preview</div>
-  <div id="pv-look" hidden>
-    <label>Style</label>
-    <div class="seg">
-      <label class="px M btn"><input type="radio" name="pv-look" value="fun"> Playful</label>
-      <label class="px M btn"><input type="radio" name="pv-look" value="formal"> Formal</label>
-    </div>
-  </div>
   <div id="pv-link">
     <label for="pv-base">Base URL</label>
     <div class="pv-base">
@@ -164,6 +155,6 @@
 
 <div id="toast" class="px M toast" role="status" hidden></div>
 
-<script src="script.js?v=20261024a"></script>
+<script src="script.js?v=20261018e"></script>
 </body>
 </html>
